@@ -1,0 +1,43 @@
+Current Version: BrodBerg V3.0b
+V3.0b
+    -Official Brodberg demo launch runs standalone on any machine
+    -Active window cycling max 3 windows
+    -new and improved navigation see HELP for new navigation controls
+V2.2b
+    -Added {COMD}, {FX}, {RATES} commands see {HELP} for more information
+    -updated hormuz map for {SHIP}
+V2.1b
+    -Added {SHIP} <Shipping Lane> function  to track shipping lane activity try SHIP HORMUZ
+V2.0b
+    - Updated {GIP} <TICKER> <1W, 1M, YTD, 1Y> implemented time frames for price graphs 1W 1M YTD 1Y
+    - Added description funtion {DES} <TICKER>
+    - Visual improvements
+    - Refractured code again
+V1.2.1b
+    -Added {GIP} "Ticker" function for 30 day price graph
+    -Updated {QUOTE} command to {Q}
+    -Still needs work on unicode compatability TBD
+V1.0b
+    -Version 1!
+    -Switched from alpha vantage (gay and costly) to finnhub.io (cool and free)
+    -Everything works right now
+    -More commands and data coming soon.....
+V0.5.1
+    -visual overhaul added colors
+    -formatting for visual aid
+V0.5
+    -implemented live market data via Alpha Vantage API
+    -Added Quote function {QUOTE} {"TICKER"}
+    -Refractured to seperate fetching from rendering
+V0.4
+    -Added Date and Time
+    -Cleaned up program tick speed and refresh rate
+V0.3
+    -Terminal is lightening fast now
+    -Added Change Log function {CL}
+    -Smooth navigation
+V0.2
+    -Debugged terminal navigation and command execution
+    -Visual improvements
+V0.1
+    -Engine assembly and test
