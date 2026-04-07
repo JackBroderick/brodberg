@@ -29,7 +29,7 @@ import brodberg_session
 def server_get(path: str, params: dict = None) -> dict:
     """GET request to the Brodberg server. Used by all commands that need market data."""
     url = f"{brodberg_session.get_server_url()}{path}"
-    r   = _requests.get(url, params=params, timeout=8)
+    r   = _requests.get(url, params=params, timeout=35)   # 35s covers Render cold starts
     r.raise_for_status()
     return r.json()
 
@@ -215,9 +215,9 @@ def _benchmark_loop():
     while True:
         try:
             _refresh_benchmarks()
+            time.sleep(BENCHMARK_REFRESH_INTERVAL)
         except Exception:
-            pass
-        time.sleep(BENCHMARK_REFRESH_INTERVAL)
+            time.sleep(10)   # retry quickly after failure (e.g. server cold start)
 
 
 def start_benchmark_thread():
@@ -274,9 +274,9 @@ def _news_loop():
     while True:
         try:
             _refresh_news()
+            time.sleep(NEWS_REFRESH_INTERVAL)
         except Exception:
-            pass
-        time.sleep(NEWS_REFRESH_INTERVAL)
+            time.sleep(10)   # retry quickly after failure (e.g. server cold start)
 
 
 def start_news_thread():
