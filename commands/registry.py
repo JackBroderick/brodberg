@@ -150,12 +150,6 @@ COMMAND_REGISTRY = [
         "fetch":  cmd_auth.fetch,
         "render": cmd_auth.render,
     },
-    {
-        "prefix": "SERVER",
-        "exact":  False,
-        "fetch":  cmd_auth.fetch,
-        "render": cmd_auth.render,
-    },
 ]
 
 # ---------------------------------------------------------------------------

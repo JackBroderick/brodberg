@@ -31,7 +31,7 @@ import os
 _SESSION_DIR  = os.path.join(os.path.expanduser("~"), ".brodberg")
 _SESSION_FILE = os.path.join(_SESSION_DIR, "session.json")
 
-_DEFAULT_SERVER = "http://localhost:8000"
+_DEFAULT_SERVER = "https://brodberg.onrender.com"
 
 
 # ---------------------------------------------------------------------------
@@ -93,5 +93,3 @@ def get_server_url() -> str:
     return load_session().get("server_url", _DEFAULT_SERVER).rstrip("/")
 
 
-def set_server_url(url: str) -> None:
-    save_session({"server_url": url.rstrip("/")})

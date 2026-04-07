@@ -60,14 +60,6 @@ def fetch(parts: list) -> dict:
     """
     action = parts[0]   # REGISTER | LOGIN | LOGOUT | PROFILE | SERVER
 
-    # ── SERVER <url> ─────────────────────────────────────────────────────────
-    if action == "SERVER":
-        if len(parts) < 2:
-            return _err("Usage:  SERVER <url>   e.g.  SERVER https://myapp.com")
-        url = parts[1]
-        brodberg_session.set_server_url(url)
-        return _ok(f"Server URL set to  {url}")
-
     # ── LOGOUT ────────────────────────────────────────────────────────────────
     if action == "LOGOUT":
         if not brodberg_session.is_logged_in():
