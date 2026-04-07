@@ -20,8 +20,6 @@ We take rates[-1] for today, rates[-21] for the 1-month-ago overlay.
 
 import curses
 import datetime
-import urllib.request
-import json
 
 import market_data
 
@@ -47,10 +45,7 @@ Y_LABEL_WIDTH = 8
 # ---------------------------------------------------------------------------
 
 def _fetch_finnhub_curve() -> dict:
-    url = (f"{market_data.BASE_URL}/bond/yield_curve"
-           f"?code=US&token={market_data.API_KEY}")
-    with urllib.request.urlopen(url, timeout=8) as resp:
-        raw = json.loads(resp.read().decode())
+    raw = market_data.server_get("/api/yield-curve")
 
     timestamps = raw.get("t", [])
     rates_list = raw.get("rates", [])

@@ -30,7 +30,6 @@ Statement tabs navigate by retyping the command with a different arg:
 """
 
 import curses
-import market_data  # reuses API_KEY and BASE_URL
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -199,70 +198,6 @@ def _fetch_yfinance(ticker: str, annual: bool) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Finnhub fallback
-# ---------------------------------------------------------------------------
-
-def _fetch_finnhub(ticker: str, annual: bool) -> dict:
-    """
-    Fallback: pull from Finnhub /financials-reported (XBRL).
-    Returns a minimal structure matching the yfinance output shape.
-    Only IS is populated from Finnhub free tier; BS/CF left as empty.
-    """
-    import urllib.request
-    import json
-
-    freq = "annual" if annual else "quarterly"
-    url  = (
-        f"{market_data.BASE_URL}/stock/financials-reported"
-        f"?symbol={ticker.upper()}&freq={freq}&token={market_data.API_KEY}"
-    )
-    with urllib.request.urlopen(url, timeout=8) as resp:
-        raw = json.loads(resp.read().decode())
-
-    reports = raw.get("data", [])[:4]  # most recent 4
-
-    if not reports:
-        raise ValueError("No Finnhub financial data available.")
-
-    # Build headers from period end dates
-    headers = []
-    for r in reports:
-        dt = r.get("endDate", "")[:7]  # "2025-03"
-        headers.append(dt)
-
-    # Map XBRL concept names → row labels for IS
-    XBRL_IS = [
-        ("Revenue",          "us-gaap_Revenues"),
-        ("Gross Profit",     "us-gaap_GrossProfit"),
-        ("Operating Income", "us-gaap_OperatingIncomeLoss"),
-        ("Net Income",       "us-gaap_NetIncomeLoss"),
-    ]
-
-    def _get_xbrl(report, concept):
-        for item in report.get("report", {}).get("ic", []):
-            if item.get("concept") == concept:
-                return item.get("value")
-        return None
-
-    is_rows = []
-    for (label, concept) in XBRL_IS:
-        vals = [_fmt(_get_xbrl(r, concept)) for r in reports]
-        is_rows.append((label, vals))
-
-    empty = {"headers": headers, "rows": []}
-
-    return {
-        "name":     ticker.upper(),
-        "currency": "USD",
-        "exchange": "",
-        "is_data":  {"headers": headers, "rows": is_rows},
-        "bs_data":  empty,
-        "cf_data":  empty,
-        "source":   "finnhub",
-    }
-
-
-# ---------------------------------------------------------------------------
 # fetch — called once on Enter
 # ---------------------------------------------------------------------------
 
@@ -276,7 +211,7 @@ def fetch(parts: list) -> dict:
     Returns cache dict with keys:
         ticker, statement, annual, data (or None), error (or None)
     """
-    ticker    = parts[1] if len(parts) > 1 else None
+    ticker = parts[1] if len(parts) > 1 else None
     if not ticker:
         return {
             "ticker": None, "statement": DEFAULT_STATEMENT,
@@ -284,7 +219,6 @@ def fetch(parts: list) -> dict:
             "error": "Usage: FA <TICKER> [IS|BS|CF] [ANNUAL]   e.g. FA AAPL BS",
         }
 
-    # Parse remaining args — order-independent
     statement = DEFAULT_STATEMENT
     annual    = False
     for arg in parts[2:]:
@@ -293,20 +227,16 @@ def fetch(parts: list) -> dict:
         elif arg == "ANNUAL":
             annual = True
 
-    # Try yfinance, fall back to Finnhub
     try:
         data = _fetch_yfinance(ticker, annual)
-    except Exception as yf_err:
-        try:
-            data = _fetch_finnhub(ticker, annual)
-        except Exception as fh_err:
-            return {
-                "ticker":    ticker,
-                "statement": statement,
-                "annual":    annual,
-                "data":      None,
-                "error":     f"yfinance: {yf_err}  |  finnhub: {fh_err}",
-            }
+    except Exception as e:
+        return {
+            "ticker":    ticker,
+            "statement": statement,
+            "annual":    annual,
+            "data":      None,
+            "error":     str(e),
+        }
 
     return {
         "ticker":    ticker,
@@ -348,15 +278,10 @@ def on_keypress(key: int, cache: dict) -> dict:
     if key in (curses.KEY_UP, curses.KEY_DOWN):
         new_annual = not current_annual
         ticker     = cache["ticker"]
-        # Re-fetch with the new frequency
         try:
             data = _fetch_yfinance(ticker, new_annual)
-        except Exception as yf_err:
-            try:
-                data = _fetch_finnhub(ticker, new_annual)
-            except Exception as fh_err:
-                # Keep existing data; show error
-                return {**cache, "error": f"yfinance: {yf_err}  |  finnhub: {fh_err}"}
+        except Exception as e:
+            return {**cache, "error": str(e)}
         return {**cache, "annual": new_annual, "data": data, "error": None}
 
     return cache

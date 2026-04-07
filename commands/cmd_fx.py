@@ -26,8 +26,6 @@ Finnhub forex candle symbols use OANDA format: "OANDA:EUR_USD"
 import curses
 import datetime
 import time
-import urllib.request
-import json
 
 import market_data
 
@@ -72,28 +70,20 @@ DEFAULT_SCREEN = "G10"
 # Finnhub helpers
 # ---------------------------------------------------------------------------
 
-def _fh_url(path):
-    return f"{market_data.BASE_URL}{path}&token={market_data.API_KEY}"
-
-
-def _fh_get(path, timeout=8):
-    with urllib.request.urlopen(_fh_url(path), timeout=timeout) as r:
-        return json.loads(r.read().decode())
-
-
 def _fetch_finnhub_rates():
-    """Single call — returns all spot rates vs USD."""
-    raw = _fh_get("/forex/rates?base=USD")
+    """Single call via server proxy — returns all spot rates vs USD."""
+    raw = market_data.server_get("/api/forex/rates")
     return raw.get("quote", {})
 
 
 def _fetch_finnhub_candles(symbol, from_ts, to_ts):
-    """Daily candles for one forex symbol over a date range."""
-    raw = _fh_get(f"/forex/candles?symbol={symbol}&resolution=D"
-                  f"&from={from_ts}&to={to_ts}")
+    """Daily candles via server proxy for one forex symbol over a date range."""
+    raw = market_data.server_get("/api/forex/candles",
+                                  params={"symbol": symbol, "resolution": "D",
+                                          "from_ts": from_ts, "to_ts": to_ts})
     if raw.get("s") != "ok":
         return None
-    return raw   # {c, h, l, o, t, v, s}
+    return raw
 
 
 def _fetch_finnhub_fx(pairs) -> list[dict]:

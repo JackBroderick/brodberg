@@ -15,10 +15,8 @@ Usage:
 """
 
 import curses
-import urllib.request
-import json
 
-import market_data   # reuses API_KEY and BASE_URL
+import market_data
 
 
 # ---------------------------------------------------------------------------
@@ -27,15 +25,10 @@ import market_data   # reuses API_KEY and BASE_URL
 
 def _fetch_profile(ticker: str) -> dict:
     """
-    Call Finnhub /stock/profile2 for `ticker`.
+    Fetch company profile via the Brodberg server proxy.
     Returns the raw JSON dict or raises on failure.
     """
-    url = (
-        f"{market_data.BASE_URL}/stock/profile2"
-        f"?symbol={ticker.upper()}&token={market_data.API_KEY}"
-    )
-    with urllib.request.urlopen(url, timeout=6) as resp:
-        return json.loads(resp.read().decode())
+    return market_data.server_get(f"/api/company/{ticker.upper()}")
 
 
 def _fmt_market_cap(raw) -> str:

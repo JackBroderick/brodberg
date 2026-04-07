@@ -18,14 +18,20 @@ underlying indices extremely closely.
 """
 
 import curses
-import urllib.request
-import json
 import datetime
 import threading
 import time
 
-from api_keys import FINNHUB_API_KEY as API_KEY
-BASE_URL = "https://finnhub.io/api/v1"
+import requests as _requests
+import brodberg_session
+
+
+def server_get(path: str, params: dict = None) -> dict:
+    """GET request to the Brodberg server. Used by all commands that need market data."""
+    url = f"{brodberg_session.get_server_url()}{path}"
+    r   = _requests.get(url, params=params, timeout=8)
+    r.raise_for_status()
+    return r.json()
 
 # ---------------------------------------------------------------------------
 # Benchmark configuration
@@ -53,17 +59,13 @@ NEWS_SCROLL_SPEED          = 2     # columns to advance per 100 ms tick
 # ---------------------------------------------------------------------------
 
 def _fetch_raw_quote(symbol):
-    """Fetch Finnhub /quote for `symbol`. Returns raw JSON dict."""
-    url = f"{BASE_URL}/quote?symbol={symbol}&token={API_KEY}"
-    with urllib.request.urlopen(url, timeout=5) as response:
-        return json.loads(response.read().decode())
+    """Fetch a quote via the Brodberg server proxy. Returns raw JSON dict."""
+    return server_get(f"/api/quote/{symbol.upper()}")
 
 
 def _fetch_raw_news():
-    """Fetch Finnhub general market news. Returns list of article dicts."""
-    url = f"{BASE_URL}/news?category=general&token={API_KEY}"
-    with urllib.request.urlopen(url, timeout=5) as response:
-        return json.loads(response.read().decode())
+    """Fetch market news via the Brodberg server proxy. Returns list of article dicts."""
+    return server_get("/api/news")
 
 
 # ---------------------------------------------------------------------------

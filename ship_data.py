@@ -39,7 +39,7 @@ import asyncio
 import os
 import sys
 
-from api_keys import AISSTREAM_API_KEY
+import brodberg_session
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +241,9 @@ def _ws_loop(location_key: str, stop_event: threading.Event):
     bbox = [[lat_min, lon_min], [lat_max, lon_max]]
 
     async def _run():
-        uri = "wss://stream.aisstream.io/v0/stream"
+        server_url = brodberg_session.get_server_url()
+        uri = server_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/ship"
         subscribe_msg = json.dumps({
-            "APIKey":             AISSTREAM_API_KEY,
             "BoundingBoxes":      [bbox],
             "FilterMessageTypes": ["PositionReport"],
         })

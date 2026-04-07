@@ -19,10 +19,6 @@ Grouped display:
 
 import curses
 import datetime
-import urllib.request
-import json
-
-import market_data
 
 # ---------------------------------------------------------------------------
 # Commodity definitions
@@ -71,28 +67,6 @@ def _fetch_yf_commodity(ticker: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Finnhub fallback  (degraded — no YTD)
-# ---------------------------------------------------------------------------
-
-def _fetch_fh_commodity(fh_symbol: str) -> dict | None:
-    try:
-        url = (f"{market_data.BASE_URL}/quote"
-               f"?symbol={fh_symbol}&token={market_data.API_KEY}")
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            raw = json.loads(resp.read().decode())
-        c  = raw.get("c", 0)
-        pc = raw.get("pc", 0)
-        if not c:
-            return None
-        change     = c - pc
-        change_pct = (change / pc * 100) if pc else 0.0
-        return {"price": c, "change": change,
-                "change_pct": change_pct, "ytd_pct": None, "source": "fh"}
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
 # fetch — called once on Enter
 # ---------------------------------------------------------------------------
 
@@ -102,8 +76,6 @@ def fetch(parts: list) -> dict:
         result[group] = []
         for (name, yf_ticker, fh_symbol, unit) in items:
             data = _fetch_yf_commodity(yf_ticker)
-            if data is None:
-                data = _fetch_fh_commodity(fh_symbol)
             result[group].append({
                 "name": name, "unit": unit, "data": data,
             })

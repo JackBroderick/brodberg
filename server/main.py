@@ -1,26 +1,30 @@
 """
 server/main.py
 --------------
-Brodberg online server — user accounts and profiles.
+Brodberg online server — user accounts, profiles, and API proxy.
 
-Endpoints:
+User account endpoints:
   POST /register            — create a new account
   POST /login               — authenticate, receive a JWT token
   GET  /profile/{username}  — view any user's public profile
   GET  /me                  — view your own profile (token required)
   PUT  /me                  — update bio / location  (token required)
 
-Database:
-  If DATABASE_URL env var is set  → PostgreSQL  (Render production)
-  Otherwise                       → SQLite file  (local dev)
-
-Run locally:
-  uvicorn server.main:app --reload --port 8000
+Market data proxy endpoints (keys live here — clients send no keys):
+  GET  /api/quote/{symbol}    — Finnhub stock quote
+  GET  /api/news              — Finnhub market news
+  GET  /api/profile/{symbol}  — Finnhub company profile
+  GET  /api/yield-curve       — Finnhub US Treasury yield curve
+  GET  /api/forex/rates       — Finnhub FX spot rates (base USD)
+  GET  /api/forex/candles     — Finnhub FX daily candles
+  WS   /api/ship              — AISStream WebSocket proxy
 
 Environment variables:
-  BRODBERG_SECRET   — JWT signing key  (REQUIRED in production)
-  DATABASE_URL      — set automatically by Render when you attach a PostgreSQL db
-  BRODBERG_DB       — SQLite file path  (local dev only, default: server/brodberg.db)
+  BRODBERG_SECRET       — JWT signing key  (required in production)
+  DATABASE_URL          — PostgreSQL URL   (set automatically by Render)
+  FINNHUB_API_KEY       — Finnhub API key
+  AISSTREAM_API_KEY     — AISStream API key
+  BRODBERG_DB           — SQLite path      (local dev only)
 """
 
 import os
@@ -33,7 +37,8 @@ import base64
 import re
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Depends
+import httpx
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
@@ -42,15 +47,20 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 
 SECRET_KEY    = os.environ.get("BRODBERG_SECRET", "change-me-before-deploying")
-TOKEN_SECONDS = 60 * 60 * 24 * 30          # 30 days
+TOKEN_SECONDS = 60 * 60 * 24 * 30
 _HERE         = os.path.dirname(os.path.abspath(__file__))
-_DATABASE_URL = os.environ.get("DATABASE_URL")                     # set by Render
+_DATABASE_URL = os.environ.get("DATABASE_URL")
 _SQLITE_PATH  = os.environ.get("BRODBERG_DB", os.path.join(_HERE, "brodberg.db"))
+
+FINNHUB_KEY   = os.environ.get("FINNHUB_API_KEY", "")
+AISSTREAM_KEY = os.environ.get("AISSTREAM_API_KEY", "")
+FH_BASE       = "https://finnhub.io/api/v1"
+AISSTREAM_URI = "wss://stream.aisstream.io/v0/stream"
 
 USERNAME_RE   = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
 
 # ---------------------------------------------------------------------------
-# Minimal JWT (HS256) — no external auth library needed
+# Minimal JWT (HS256)
 # ---------------------------------------------------------------------------
 
 def _b64url(data: bytes) -> str:
@@ -80,38 +90,27 @@ def _verify_token(token: str) -> str:
     return data["sub"]
 
 # ---------------------------------------------------------------------------
-# Database abstraction — SQLite locally, PostgreSQL on Render
+# Database
 # ---------------------------------------------------------------------------
 
 def _q(sql: str) -> str:
-    """Swap ? → %s when running on PostgreSQL."""
     if _DATABASE_URL:
         return sql.replace("?", "%s")
     return sql
 
-
 def _get_conn():
-    """
-    Return an open DB connection.
-    SQLite  → conn.row_factory = sqlite3.Row  (rows are dict-like)
-    Postgres → RealDictCursor  (rows are also dict-like)
-    """
     if _DATABASE_URL:
         import psycopg2
         import psycopg2.extras
-        return psycopg2.connect(_DATABASE_URL,
-                                cursor_factory=psycopg2.extras.RealDictCursor)
+        return psycopg2.connect(_DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     conn = sqlite3.connect(_SQLITE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def _execute(conn, sql: str, params: tuple = ()):
-    """Run a statement and return the cursor."""
     cur = conn.cursor()
     cur.execute(_q(sql), params)
     return cur
-
 
 def _init_db() -> None:
     conn = _get_conn()
@@ -173,7 +172,7 @@ class UpdateProfileRequest(BaseModel):
     location: str = ""
 
 # ---------------------------------------------------------------------------
-# Routes
+# User account routes
 # ---------------------------------------------------------------------------
 
 @app.post("/register", status_code=201)
@@ -194,8 +193,7 @@ def register(req: RegisterRequest):
     try:
         _execute(conn,
             "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, pw_hash, created),
-        )
+            (username, pw_hash, created))
         conn.commit()
     except Exception as e:
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
@@ -227,8 +225,7 @@ def get_profile(username: str):
     conn = _get_conn()
     cur  = _execute(conn,
         "SELECT username, created_at, bio, location FROM users WHERE username = ?",
-        (username.lower(),),
-    )
+        (username.lower(),))
     row = cur.fetchone()
     conn.close()
 
@@ -242,8 +239,7 @@ def get_me(username: str = Depends(_current_user)):
     conn = _get_conn()
     cur  = _execute(conn,
         "SELECT username, created_at, bio, location FROM users WHERE username = ?",
-        (username,),
-    )
+        (username,))
     row = cur.fetchone()
     conn.close()
 
@@ -257,8 +253,96 @@ def update_me(req: UpdateProfileRequest, username: str = Depends(_current_user))
     conn = _get_conn()
     _execute(conn,
         "UPDATE users SET bio = ?, location = ? WHERE username = ?",
-        (req.bio[:200], req.location[:100], username),
-    )
+        (req.bio[:200], req.location[:100], username))
     conn.commit()
     conn.close()
     return {"message": "Profile updated."}
+
+# ---------------------------------------------------------------------------
+# Market data proxy routes
+# Finnhub API key is injected server-side — clients send none.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/quote/{symbol}")
+async def proxy_quote(symbol: str):
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{FH_BASE}/quote",
+                             params={"symbol": symbol.upper(), "token": FINNHUB_KEY},
+                             timeout=8)
+    return r.json()
+
+
+@app.get("/api/news")
+async def proxy_news():
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{FH_BASE}/news",
+                             params={"category": "general", "token": FINNHUB_KEY},
+                             timeout=8)
+    return r.json()
+
+
+@app.get("/api/company/{symbol}")
+async def proxy_company_profile(symbol: str):
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{FH_BASE}/stock/profile2",
+                             params={"symbol": symbol.upper(), "token": FINNHUB_KEY},
+                             timeout=8)
+    return r.json()
+
+
+@app.get("/api/yield-curve")
+async def proxy_yield_curve():
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{FH_BASE}/bond/yield_curve",
+                             params={"code": "US", "token": FINNHUB_KEY},
+                             timeout=10)
+    return r.json()
+
+
+@app.get("/api/forex/rates")
+async def proxy_forex_rates():
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{FH_BASE}/forex/rates",
+                             params={"base": "USD", "token": FINNHUB_KEY},
+                             timeout=8)
+    return r.json()
+
+
+@app.get("/api/forex/candles")
+async def proxy_forex_candles(symbol: str, resolution: str = "D",
+                               from_ts: int = 0, to_ts: int = 0):
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{FH_BASE}/forex/candle",
+                             params={"symbol": symbol, "resolution": resolution,
+                                     "from": from_ts, "to": to_ts,
+                                     "token": FINNHUB_KEY},
+                             timeout=10)
+    return r.json()
+
+
+# ---------------------------------------------------------------------------
+# AISStream WebSocket proxy
+# The client sends the subscription (minus APIKey); server injects the key.
+# ---------------------------------------------------------------------------
+
+@app.websocket("/api/ship")
+async def ship_ws_proxy(ws: WebSocket):
+    await ws.accept()
+    try:
+        import websockets as _ws
+        sub_text = await ws.receive_text()
+        sub_data = json.loads(sub_text)
+        sub_data["APIKey"] = AISSTREAM_KEY      # inject server-side key
+
+        async with _ws.connect(AISSTREAM_URI) as ais:
+            await ais.send(json.dumps(sub_data))
+            async for raw in ais:
+                msg = raw if isinstance(raw, str) else raw.decode("utf-8", errors="ignore")
+                try:
+                    await ws.send_text(msg)
+                except WebSocketDisconnect:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
