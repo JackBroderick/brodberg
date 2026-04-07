@@ -17,6 +17,7 @@ Market data proxy endpoints (keys live here — clients send no keys):
   GET  /api/yield-curve       — Finnhub US Treasury yield curve
   GET  /api/forex/rates       — Finnhub FX spot rates (base USD)
   GET  /api/forex/candles     — Finnhub FX daily candles
+  GET  /api/live/benchmarks   — real-time benchmark prices (live store)
   WS   /api/ship              — AISStream WebSocket proxy
 
 Environment variables:
@@ -35,6 +36,9 @@ import json
 import time
 import base64
 import re
+import asyncio
+import threading
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 
 import httpx
@@ -58,6 +62,178 @@ FH_BASE       = "https://finnhub.io/api/v1"
 AISSTREAM_URI = "wss://stream.aisstream.io/v0/stream"
 
 USERNAME_RE   = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
+
+# ---------------------------------------------------------------------------
+# Shared HTTP client (created once at startup, reused across all requests)
+# ---------------------------------------------------------------------------
+
+_http_client: httpx.AsyncClient = None
+
+# ---------------------------------------------------------------------------
+# Simple TTL response cache
+# ---------------------------------------------------------------------------
+
+_cache: dict        = {}
+_cache_lock         = threading.Lock()
+
+# Cache TTLs in seconds
+_TTL_QUOTE          = 30
+_TTL_NEWS           = 300
+_TTL_COMPANY        = 3600
+_TTL_YIELD_CURVE    = 3600
+_TTL_FOREX_RATES    = 60
+_TTL_FOREX_CANDLES  = 300
+
+
+def _cache_get(key: str):
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and time.time() < entry["exp"]:
+            return entry["data"]
+    return None
+
+
+def _cache_set(key: str, data, ttl: int):
+    with _cache_lock:
+        _cache[key] = {"data": data, "exp": time.time() + ttl}
+
+
+# ---------------------------------------------------------------------------
+# Live benchmark price store
+# All access is within the asyncio event loop — no lock needed.
+# ---------------------------------------------------------------------------
+
+_live_prices: dict = {}   # symbol -> {"price": float, "change_pct": float|None}
+
+# Symbols streamed via Finnhub WebSocket (real-time trade feed)
+_WS_BENCH   = ["BINANCE:BTCUSDT"]
+
+# Symbols polled via REST every N seconds (indices have no trade feed)
+_REST_BENCH = ["^GSPC", "^IXIC", "^DJI", "GLD", "SLV", "BNO", "UNG"]
+
+_REST_POLL_INTERVAL = 15  # seconds — indices tick every ~15s during market hours
+
+
+async def _rest_bench_poll():
+    """Poll Finnhub REST for index/ETF benchmark prices every 5 seconds."""
+    while True:
+        for sym in _REST_BENCH:
+            try:
+                r = await _http_client.get(f"{FH_BASE}/quote",
+                                           params={"symbol": sym, "token": FINNHUB_KEY})
+                q = r.json()
+                if q.get("c"):
+                    _live_prices[sym] = {"price": q["c"], "change_pct": q.get("dp")}
+            except Exception:
+                pass
+        await asyncio.sleep(_REST_POLL_INTERVAL)
+
+
+async def _finnhub_ws_bench():
+    """Maintain a persistent Finnhub WebSocket for real-time benchmark trade prices."""
+    import websockets
+    uri = f"wss://ws.finnhub.io?token={FINNHUB_KEY}"
+
+    # Seed change_pct for WS symbols from REST before streaming starts
+    for sym in _WS_BENCH:
+        try:
+            r = await _http_client.get(f"{FH_BASE}/quote",
+                                       params={"symbol": sym, "token": FINNHUB_KEY})
+            q = r.json()
+            if q.get("c"):
+                _live_prices[sym] = {"price": q["c"], "change_pct": q.get("dp")}
+        except Exception:
+            pass
+
+    while True:
+        try:
+            async with websockets.connect(uri, ping_interval=20) as ws:
+                for sym in _WS_BENCH:
+                    await ws.send(json.dumps({"type": "subscribe", "symbol": sym}))
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    if msg.get("type") == "trade":
+                        for trade in msg.get("data", []):
+                            sym = trade["s"]
+                            entry = _live_prices.get(sym, {})
+                            entry["price"] = trade["p"]
+                            _live_prices[sym] = entry
+        except Exception:
+            await asyncio.sleep(5)   # reconnect after any error
+
+
+# ---------------------------------------------------------------------------
+# Database — connection pool (PostgreSQL) or sqlite (local dev)
+# ---------------------------------------------------------------------------
+
+_pool = None
+
+
+def _init_pool():
+    global _pool
+    if _DATABASE_URL:
+        import psycopg2.pool
+        _pool = psycopg2.pool.ThreadedConnectionPool(1, 10, _DATABASE_URL)
+
+
+def _q(sql: str) -> str:
+    if _DATABASE_URL:
+        return sql.replace("?", "%s")
+    return sql
+
+
+@contextmanager
+def _db_conn():
+    """Context manager that yields a DB connection and returns it to the pool on exit."""
+    if _DATABASE_URL and _pool:
+        import psycopg2.extras
+        conn = _pool.getconn()
+        conn.cursor_factory = psycopg2.extras.RealDictCursor
+        try:
+            yield conn
+        finally:
+            _pool.putconn(conn)
+    else:
+        conn = sqlite3.connect(_SQLITE_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+
+def _execute(conn, sql: str, params: tuple = ()):
+    cur = conn.cursor()
+    cur.execute(_q(sql), params)
+    return cur
+
+
+def _init_db() -> None:
+    with _db_conn() as conn:
+        if _DATABASE_URL:
+            _execute(conn, """
+                CREATE TABLE IF NOT EXISTS users (
+                    id            SERIAL PRIMARY KEY,
+                    username      TEXT   UNIQUE NOT NULL,
+                    password_hash TEXT   NOT NULL,
+                    created_at    TEXT   NOT NULL,
+                    bio           TEXT   NOT NULL DEFAULT '',
+                    location      TEXT   NOT NULL DEFAULT ''
+                )
+            """)
+        else:
+            _execute(conn, """
+                CREATE TABLE IF NOT EXISTS users (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username      TEXT    UNIQUE NOT NULL COLLATE NOCASE,
+                    password_hash TEXT    NOT NULL,
+                    created_at    TEXT    NOT NULL,
+                    bio           TEXT    NOT NULL DEFAULT '',
+                    location      TEXT    NOT NULL DEFAULT ''
+                )
+            """)
+        conn.commit()
+
 
 # ---------------------------------------------------------------------------
 # Minimal JWT (HS256)
@@ -90,70 +266,30 @@ def _verify_token(token: str) -> str:
     return data["sub"]
 
 # ---------------------------------------------------------------------------
-# Database
+# FastAPI app — lifespan manages shared client and connection pool
 # ---------------------------------------------------------------------------
 
-def _q(sql: str) -> str:
-    if _DATABASE_URL:
-        return sql.replace("?", "%s")
-    return sql
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _http_client
+    _http_client = httpx.AsyncClient(timeout=10.0)
+    _init_pool()
+    _init_db()
+    asyncio.create_task(_rest_bench_poll())
+    asyncio.create_task(_finnhub_ws_bench())
+    yield
+    await _http_client.aclose()
+    if _pool:
+        _pool.closeall()
 
-def _get_conn():
-    if _DATABASE_URL:
-        import psycopg2
-        import psycopg2.extras
-        return psycopg2.connect(_DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-    conn = sqlite3.connect(_SQLITE_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
-def _execute(conn, sql: str, params: tuple = ()):
-    cur = conn.cursor()
-    cur.execute(_q(sql), params)
-    return cur
-
-def _init_db() -> None:
-    conn = _get_conn()
-    if _DATABASE_URL:
-        _execute(conn, """
-            CREATE TABLE IF NOT EXISTS users (
-                id            SERIAL PRIMARY KEY,
-                username      TEXT   UNIQUE NOT NULL,
-                password_hash TEXT   NOT NULL,
-                created_at    TEXT   NOT NULL,
-                bio           TEXT   NOT NULL DEFAULT '',
-                location      TEXT   NOT NULL DEFAULT ''
-            )
-        """)
-    else:
-        _execute(conn, """
-            CREATE TABLE IF NOT EXISTS users (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                username      TEXT    UNIQUE NOT NULL COLLATE NOCASE,
-                password_hash TEXT    NOT NULL,
-                created_at    TEXT    NOT NULL,
-                bio           TEXT    NOT NULL DEFAULT '',
-                location      TEXT    NOT NULL DEFAULT ''
-            )
-        """)
-    conn.commit()
-    conn.close()
-
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
-
-app       = FastAPI(title="Brodberg Server", version="1.0.0")
+app       = FastAPI(title="Brodberg Server", version="1.0.0", lifespan=lifespan)
 _security = HTTPBearer(auto_error=False)
 
 def _current_user(creds: HTTPAuthorizationCredentials = Depends(_security)) -> str:
     if not creds:
         raise HTTPException(status_code=401, detail="Authorization header required")
     return _verify_token(creds.credentials)
-
-@app.on_event("startup")
-def startup():
-    _init_db()
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -189,18 +325,16 @@ def register(req: RegisterRequest):
     created  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     username = req.username.lower()
 
-    conn = _get_conn()
-    try:
-        _execute(conn,
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, pw_hash, created))
-        conn.commit()
-    except Exception as e:
-        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
-            raise HTTPException(status_code=409, detail="Username already taken")
-        raise HTTPException(status_code=500, detail="Database error")
-    finally:
-        conn.close()
+    with _db_conn() as conn:
+        try:
+            _execute(conn,
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                (username, pw_hash, created))
+            conn.commit()
+        except Exception as e:
+            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                raise HTTPException(status_code=409, detail="Username already taken")
+            raise HTTPException(status_code=500, detail="Database error")
 
     return {"message": f"Account '{req.username}' created successfully."}
 
@@ -208,10 +342,9 @@ def register(req: RegisterRequest):
 @app.post("/login")
 def login(req: LoginRequest):
     import bcrypt
-    conn = _get_conn()
-    cur  = _execute(conn, "SELECT * FROM users WHERE username = ?", (req.username.lower(),))
-    row  = cur.fetchone()
-    conn.close()
+    with _db_conn() as conn:
+        cur = _execute(conn, "SELECT * FROM users WHERE username = ?", (req.username.lower(),))
+        row = cur.fetchone()
 
     if not row or not bcrypt.checkpw(req.password.encode(), row["password_hash"].encode()):
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -222,12 +355,11 @@ def login(req: LoginRequest):
 
 @app.get("/profile/{username}")
 def get_profile(username: str):
-    conn = _get_conn()
-    cur  = _execute(conn,
-        "SELECT username, created_at, bio, location FROM users WHERE username = ?",
-        (username.lower(),))
-    row = cur.fetchone()
-    conn.close()
+    with _db_conn() as conn:
+        cur = _execute(conn,
+            "SELECT username, created_at, bio, location FROM users WHERE username = ?",
+            (username.lower(),))
+        row = cur.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
@@ -236,12 +368,11 @@ def get_profile(username: str):
 
 @app.get("/me")
 def get_me(username: str = Depends(_current_user)):
-    conn = _get_conn()
-    cur  = _execute(conn,
-        "SELECT username, created_at, bio, location FROM users WHERE username = ?",
-        (username,))
-    row = cur.fetchone()
-    conn.close()
+    with _db_conn() as conn:
+        cur = _execute(conn,
+            "SELECT username, created_at, bio, location FROM users WHERE username = ?",
+            (username,))
+        row = cur.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
@@ -250,74 +381,100 @@ def get_me(username: str = Depends(_current_user)):
 
 @app.put("/me")
 def update_me(req: UpdateProfileRequest, username: str = Depends(_current_user)):
-    conn = _get_conn()
-    _execute(conn,
-        "UPDATE users SET bio = ?, location = ? WHERE username = ?",
-        (req.bio[:200], req.location[:100], username))
-    conn.commit()
-    conn.close()
+    with _db_conn() as conn:
+        _execute(conn,
+            "UPDATE users SET bio = ?, location = ? WHERE username = ?",
+            (req.bio[:200], req.location[:100], username))
+        conn.commit()
     return {"message": "Profile updated."}
 
 # ---------------------------------------------------------------------------
 # Market data proxy routes
 # Finnhub API key is injected server-side — clients send none.
+# Responses are cached to reduce Finnhub API usage.
 # ---------------------------------------------------------------------------
 
 @app.get("/api/quote/{symbol}")
 async def proxy_quote(symbol: str):
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{FH_BASE}/quote",
-                             params={"symbol": symbol.upper(), "token": FINNHUB_KEY},
-                             timeout=8)
-    return r.json()
+    key = f"quote:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/quote",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_QUOTE)
+    return data
 
 
 @app.get("/api/news")
 async def proxy_news():
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{FH_BASE}/news",
-                             params={"category": "general", "token": FINNHUB_KEY},
-                             timeout=8)
-    return r.json()
+    cached = _cache_get("news")
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/news",
+                               params={"category": "general", "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set("news", data, _TTL_NEWS)
+    return data
 
 
 @app.get("/api/company/{symbol}")
 async def proxy_company_profile(symbol: str):
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{FH_BASE}/stock/profile2",
-                             params={"symbol": symbol.upper(), "token": FINNHUB_KEY},
-                             timeout=8)
-    return r.json()
+    key = f"company:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/stock/profile2",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_COMPANY)
+    return data
 
 
 @app.get("/api/yield-curve")
 async def proxy_yield_curve():
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{FH_BASE}/bond/yield_curve",
-                             params={"code": "US", "token": FINNHUB_KEY},
-                             timeout=10)
-    return r.json()
+    cached = _cache_get("yield-curve")
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/bond/yield_curve",
+                               params={"code": "US", "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set("yield-curve", data, _TTL_YIELD_CURVE)
+    return data
 
 
 @app.get("/api/forex/rates")
 async def proxy_forex_rates():
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{FH_BASE}/forex/rates",
-                             params={"base": "USD", "token": FINNHUB_KEY},
-                             timeout=8)
-    return r.json()
+    cached = _cache_get("forex:rates")
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/forex/rates",
+                               params={"base": "USD", "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set("forex:rates", data, _TTL_FOREX_RATES)
+    return data
 
 
 @app.get("/api/forex/candles")
 async def proxy_forex_candles(symbol: str, resolution: str = "D",
                                from_ts: int = 0, to_ts: int = 0):
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{FH_BASE}/forex/candle",
-                             params={"symbol": symbol, "resolution": resolution,
-                                     "from": from_ts, "to": to_ts,
-                                     "token": FINNHUB_KEY},
-                             timeout=10)
-    return r.json()
+    key = f"forex:candles:{symbol}:{resolution}:{from_ts}:{to_ts}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/forex/candle",
+                               params={"symbol": symbol, "resolution": resolution,
+                                       "from": from_ts, "to": to_ts,
+                                       "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_FOREX_CANDLES)
+    return data
+
+
+@app.get("/api/live/benchmarks")
+async def live_benchmarks():
+    return dict(_live_prices)
 
 
 # ---------------------------------------------------------------------------

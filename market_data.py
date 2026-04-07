@@ -9,12 +9,8 @@ Supported by commands:
   cmd_gip.py    — GIP <TICKER>
 
 Header rows owned by this module:
-  Row 1 — benchmark banner : SPY / QQQ / DIA / GLD / SLV / …
+  Row 1 — benchmark banner : S&P 500 / NASDAQ / DOW / …
   Row 2 — scrolling news ticker : top N market headlines
-
-Note: Finnhub free tier does not expose raw index symbols (^GSPC etc.).
-ETF proxies are the standard free-tier workaround and track their
-underlying indices extremely closely.
 """
 
 import curses
@@ -27,7 +23,7 @@ def server_get(path: str, params: dict = None) -> dict:
     import requests
     import brodberg_session
     url = f"{brodberg_session.get_server_url()}{path}"
-    r   = requests.get(url, params=params, timeout=35)   # 35s covers Render cold starts
+    r   = requests.get(url, params=params, timeout=10)
     r.raise_for_status()
     return r.json()
 
@@ -36,17 +32,17 @@ def server_get(path: str, params: dict = None) -> dict:
 # ---------------------------------------------------------------------------
 
 BENCHMARKS = [
-    {"symbol": "SPY",  "label": "SPY"},
-    {"symbol": "QQQ",  "label": "QQQ"},
-    {"symbol": "DIA",  "label": "DOW"},
-    {"symbol": "GLD",  "label": "GOLD (GLD)"},
-    {"symbol": "SLV",  "label": "SILVER (SLV)"},
-    {"symbol": "BNO",  "label": "BRENT (BNO)"},
-    {"symbol": "UNG",  "label": "NAT GAS (UNG)"},
-    {"symbol": "BTC",  "label": "BTC (ETF)"},
+    {"symbol": "^GSPC",           "label": "S&P 500"},
+    {"symbol": "^IXIC",           "label": "NASDAQ"},
+    {"symbol": "^DJI",            "label": "DOW"},
+    {"symbol": "GLD",             "label": "GOLD"},
+    {"symbol": "SLV",             "label": "SILVER"},
+    {"symbol": "BNO",             "label": "BRENT"},
+    {"symbol": "UNG",             "label": "NAT GAS"},
+    {"symbol": "BINANCE:BTCUSDT", "label": "BTC"},
 ]
 
-BENCHMARK_REFRESH_INTERVAL = 60    # seconds
+BENCHMARK_REFRESH_INTERVAL = 3     # seconds — server keeps live prices, client just polls
 NEWS_REFRESH_INTERVAL      = 600   # seconds (10 minutes)
 NEWS_HEADLINE_COUNT        = 3     # how many headlines to show in the ticker
 NEWS_SCROLL_SPEED          = 2     # columns to advance per 100 ms tick
@@ -193,18 +189,21 @@ _benchmark_thread = None
 
 
 def _refresh_benchmarks():
+    try:
+        live = server_get("/api/live/benchmarks")
+    except Exception:
+        live = {}
+
     new_data = []
     for b in BENCHMARKS:
         entry = {"label": b["label"], "symbol": b["symbol"],
-                 "price": "ERR", "change": None}
-        try:
-            raw = _fetch_raw_quote(b["symbol"])
-            if raw and raw.get("c", 0) != 0:
-                entry["price"]  = f"{raw['c']:.2f}"
-                entry["change"] = raw.get("dp", None)
-        except Exception:
-            pass
+                 "price": "...", "change": None}
+        data = live.get(b["symbol"])
+        if data and data.get("price"):
+            entry["price"]  = f"{data['price']:.2f}"
+            entry["change"] = data.get("change_pct")
         new_data.append(entry)
+
     with _benchmark_lock:
         _benchmark_data[:] = new_data
 
@@ -215,7 +214,7 @@ def _benchmark_loop():
             _refresh_benchmarks()
             time.sleep(BENCHMARK_REFRESH_INTERVAL)
         except Exception:
-            time.sleep(10)   # retry quickly after failure (e.g. server cold start)
+            time.sleep(10)
 
 
 def start_benchmark_thread():
@@ -274,7 +273,7 @@ def _news_loop():
             _refresh_news()
             time.sleep(NEWS_REFRESH_INTERVAL)
         except Exception:
-            time.sleep(10)   # retry quickly after failure (e.g. server cold start)
+            time.sleep(10)
 
 
 def start_news_thread():

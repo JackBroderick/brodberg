@@ -63,10 +63,11 @@ from commands import cmd_user
 
 COMMAND_REGISTRY = [
     {
-        "prefix": "HELP",
-        "exact":  True,
-        "fetch":  cmd_help.fetch,
-        "render": cmd_help.render,
+        "prefix":      "HELP",
+        "exact":       True,
+        "fetch":       cmd_help.fetch,
+        "render":      cmd_help.render,
+        "on_keypress": cmd_help.on_keypress,
     },
     {
         "prefix": "CL",

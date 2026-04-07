@@ -1,44 +1,60 @@
- General
+## General
 
-  HELP               - Displays list of all available commands
-  CLEAR              - Clears the terminal
-  EXIT               - Closes the terminal
-  CL                 - Version Change Log
+  HELP               - Browse command reference  (← → to switch category)
+  CL                 - Version change log
+  CLEAR              - Clear the active pane
+  EXIT               - Close the terminal
 
- Equity
+## Equity
 
-  Q <Ticker>                      - Quick quote
-  GIP <Ticker> <Timeframe>        - Price chart  |  Timeframes: 1W 1M 3M YTD 1Y
-  DES <Ticker>                    - Security description and detail
-  FA <Ticker> [IS|BS|CF] [ANNUAL] - Fundamental analysis (financial statements)
+  Q <Ticker>                       - Live quote
+  GIP <Ticker> [Timeframe]         - Price chart
+                                     Timeframes: 1W  1M  3M  YTD  1Y  (default 1Y)
+                                     ← → to cycle timeframes in pane mode
 
- Macro
+  DES <Ticker>                     - Company description and profile
 
-  RATES              - U.S. Treasury yield curve + inversion status
-  COMD               - Commodities dashboard (Energy, Metals, Grains)
-  FX [G10|EM]        - FX major pairs vs USD  |  Screens: G10 (default), EM
-  SHIP <Lane>        - Live AIS vessel tracking  |  Lanes: HORMUZ
+  FA <Ticker> [Statement] [ANNUAL] - Financial statements
+                                     Statements: IS  BS  CF  (default IS)
+                                     ← → to switch statement
+                                     ↑ ↓  to toggle quarterly / annual
 
- Account
+## Macro
 
-  USER                  - View your profile
-  USER login            - Sign in  (interactive form)
-  USER register         - Create an account  (interactive form)
-  USER logout           - Sign out
-  USER edit             - Edit your bio and location  (interactive form)
-  USER <username>       - View another user's profile
+  RATES              - U.S. Treasury yield curve with inversion status
+                       Overlays today vs 1 month ago
 
- Navigation
+  COMD               - Commodities dashboard
+                       Groups: Energy  Metals  Grains
+
+  FX [G10|EM]        - FX major pairs vs USD
+                       Screens: G10 (default)  EM
+                       ← → to switch screen
+
+  SHIP <Lane>        - Live AIS vessel tracking
+                       Lanes: HORMUZ
+
+## Account
+
+  USER               - View your own profile
+  USER login         - Sign in  (interactive form — ↑ ↓ navigate, Enter submit)
+  USER register      - Create an account  (interactive form)
+  USER logout        - Sign out
+  USER edit          - Edit bio and location  (interactive form)
+  USER <username>    - View another user's profile
+
+## Navigation
 
   ` (backtick)       - Toggle INPUT mode / PANE mode
 
   INPUT mode
     Type a command and press Enter to run it.
-    After Enter the terminal auto-switches to PANE mode.
+    ↑ ↓              - Scroll command history
+    After Enter, the terminal auto-switches to PANE mode.
     Press ` at any time to return to INPUT mode.
 
-  PANE mode  (active after every command)
+  PANE mode  (enters automatically after every command)
     Z                - Toggle zoom  (focused pane fills screen; others as tabs)
     Tab              - Cycle focused pane
-    ↑ ↓              - Scroll content
-    ← →              - Switch timeframe or tab  (GIP, FA, FX)
+    ↑ ↓              - Scroll or navigate  (command-specific)
+    ← →              - Switch tab / timeframe  (GIP, FA, FX, HELP)

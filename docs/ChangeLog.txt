@@ -1,4 +1,7 @@
-Current Version: BrodBerg V3.0b
+Current Version: BrodBerg V4.0
+V4.0
+    -User profiles introduced
+    -Restructure to web host. Brodberg can be ran from anywhere.
 V3.0b
     -Official Brodberg demo launch runs standalone on any machine
     -Active window cycling max 3 windows
