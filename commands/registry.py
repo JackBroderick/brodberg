@@ -55,6 +55,11 @@ from commands import cmd_rates
 from commands import cmd_comd
 from commands import cmd_fx
 from commands import cmd_user
+from commands import cmd_peers
+from commands import cmd_exec
+from commands import cmd_div
+from commands import cmd_own
+from commands import cmd_sent
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -133,6 +138,37 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_user.fetch,
         "render":      cmd_user.render,
         "on_keypress": cmd_user.on_keypress,
+    },
+    # ── Fundamental / ownership data ─────────────────────────────────────────
+    {
+        "prefix": "PEERS",
+        "exact":  False,
+        "fetch":  cmd_peers.fetch,
+        "render": cmd_peers.render,
+    },
+    {
+        "prefix": "EXEC",
+        "exact":  False,
+        "fetch":  cmd_exec.fetch,
+        "render": cmd_exec.render,
+    },
+    {
+        "prefix": "DIV",
+        "exact":  False,
+        "fetch":  cmd_div.fetch,
+        "render": cmd_div.render,
+    },
+    {
+        "prefix": "OWN",
+        "exact":  False,
+        "fetch":  cmd_own.fetch,
+        "render": cmd_own.render,
+    },
+    {
+        "prefix": "SENT",
+        "exact":  False,
+        "fetch":  cmd_sent.fetch,
+        "render": cmd_sent.render,
     },
 ]
 

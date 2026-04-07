@@ -83,6 +83,11 @@ _TTL_COMPANY        = 3600
 _TTL_YIELD_CURVE    = 3600
 _TTL_FOREX_RATES    = 60
 _TTL_FOREX_CANDLES  = 300
+_TTL_PEERS          = 86400   # 24 hours — peer groups rarely change
+_TTL_EXECUTIVES     = 86400
+_TTL_DIVIDENDS      = 3600
+_TTL_INSIDER        = 1800    # 30 minutes
+_TTL_SENTIMENT      = 300
 
 
 def _cache_get(key: str):
@@ -469,6 +474,76 @@ async def proxy_forex_candles(symbol: str, resolution: str = "D",
                                        "token": FINNHUB_KEY})
     data = r.json()
     _cache_set(key, data, _TTL_FOREX_CANDLES)
+    return data
+
+
+@app.get("/api/peers/{symbol}")
+async def proxy_peers(symbol: str):
+    key = f"peers:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/stock/peers",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_PEERS)
+    return data
+
+
+@app.get("/api/executives/{symbol}")
+async def proxy_executives(symbol: str):
+    key = f"executives:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/stock/executive",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_EXECUTIVES)
+    return data
+
+
+@app.get("/api/dividends/{symbol}")
+async def proxy_dividends(symbol: str):
+    key = f"dividends:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    from datetime import date, timedelta
+    today     = date.today()
+    from_date = (today - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
+    to_date   = today.strftime("%Y-%m-%d")
+    r = await _http_client.get(f"{FH_BASE}/stock/dividend",
+                               params={"symbol": symbol.upper(), "from": from_date,
+                                       "to": to_date, "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_DIVIDENDS)
+    return data
+
+
+@app.get("/api/insider/{symbol}")
+async def proxy_insider(symbol: str):
+    key = f"insider:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/stock/insider-transactions",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_INSIDER)
+    return data
+
+
+@app.get("/api/sentiment/{symbol}")
+async def proxy_sentiment(symbol: str):
+    key = f"sentiment:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/news-sentiment",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_SENTIMENT)
     return data
 
 

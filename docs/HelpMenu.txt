@@ -14,6 +14,18 @@
 
   DES <Ticker>                     - Company description and profile
 
+  PEERS <Ticker>                   - Peer / competitor companies
+
+  EXEC <Ticker>                    - Executive team and board with compensation
+
+  DIV <Ticker>                     - Dividend history (up to 10 years)
+
+  OWN <Ticker>                     - Insider / ownership transactions
+                                     Green = Purchase  Red = Sale
+
+  SENT <Ticker>                    - News sentiment score and buzz metrics
+                                     Bull/bear breakdown vs sector average
+
   FA <Ticker> [Statement] [ANNUAL] - Financial statements
                                      Statements: IS  BS  CF  (default IS)
                                      ← → to switch statement
