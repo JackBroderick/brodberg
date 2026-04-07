@@ -31,7 +31,7 @@ import market_data
 
 # Ordered cycle of timeframes for ← / → navigation.
 # Must be valid keys in market_data.TIMEFRAME_MAP.
-TIMEFRAME_CYCLE = ["RT", "1W", "1M", "3M", "1Y", "YTD"]
+TIMEFRAME_CYCLE = ["1W", "1M", "3M", "1Y", "YTD"]
 
 
 # ---------------------------------------------------------------------------
@@ -50,10 +50,7 @@ def fetch(parts: list) -> dict:
     timeframe = parts[2] if len(parts) > 2 else market_data.DEFAULT_TIMEFRAME
 
     data, error = market_data.fetch_gip_data(ticker, timeframe)
-    cache = {"data": data, "error": error, "ticker": ticker, "timeframe": timeframe}
-    if timeframe == "RT" and data and not error:
-        market_data.start_rt_refresh(cache)
-    return cache
+    return {"data": data, "error": error, "ticker": ticker, "timeframe": timeframe}
 
 
 # ---------------------------------------------------------------------------
@@ -87,14 +84,8 @@ def on_keypress(key: int, cache: dict) -> dict:
     else:
         return cache
 
-    # Stop any running RT thread before switching timeframe
-    market_data.stop_rt_refresh(cache)
-
     data, error = market_data.fetch_gip_data(ticker, new_tf)
-    new_cache = {"data": data, "error": error, "ticker": ticker, "timeframe": new_tf}
-    if new_tf == "RT" and data and not error:
-        market_data.start_rt_refresh(new_cache)
-    return new_cache
+    return {"data": data, "error": error, "ticker": ticker, "timeframe": new_tf}
 
 
 # ---------------------------------------------------------------------------
@@ -112,16 +103,6 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     # ── Timeframe tab bar ─────────────────────────────────────────────────
     timeframe = cache.get("timeframe", market_data.DEFAULT_TIMEFRAME)
     _render_tf_bar(stdscr, 4, timeframe, colors, width)
-
-    # ── Live indicator (RT mode only) ─────────────────────────────────────
-    if timeframe == "RT" and cache.get("data"):
-        label = " ● LIVE "
-        try:
-            stdscr.attron(colors["positive"] | curses.A_BOLD)
-            stdscr.addstr(4, width - len(label) - 2, label)
-            stdscr.attroff(colors["positive"] | curses.A_BOLD)
-        except Exception:
-            pass
 
     chart.render_gip(stdscr, cache, colors)
 

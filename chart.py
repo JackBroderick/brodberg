@@ -162,7 +162,6 @@ def render_gip(stdscr, gip_cache: dict, colors: dict) -> None:
     put(r,     0, separator,                                                     colors["dim"])
     timeframe = d.get("timeframe", "")
     tf_label  = {
-        "RT":  "Real-Time (Today)",
         "1W":  "1-Week",
         "1M":  "1-Month",
         "3M":  "3-Month",

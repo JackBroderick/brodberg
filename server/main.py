@@ -17,7 +17,6 @@ Market data proxy endpoints (keys live here — clients send no keys):
   GET  /api/yield-curve       — Finnhub US Treasury yield curve
   GET  /api/forex/rates       — Finnhub FX spot rates (base USD)
   GET  /api/forex/candles     — Finnhub FX daily candles
-  GET  /api/candles/{symbol}  — Finnhub stock or crypto OHLCV candles
   GET  /api/live/benchmarks   — real-time benchmark prices (live store)
   WS   /api/ship              — AISStream WebSocket proxy
 
@@ -473,73 +472,9 @@ async def proxy_forex_candles(symbol: str, resolution: str = "D",
     return data
 
 
-# Maps user-facing ticker to Finnhub crypto symbol
-_CRYPTO_SYMBOLS = {
-    "BTC":     "BINANCE:BTCUSDT",
-    "BTCUSD":  "BINANCE:BTCUSDT",
-    "BTCUSDT": "BINANCE:BTCUSDT",
-    "ETH":     "BINANCE:ETHUSDT",
-    "ETHUSD":  "BINANCE:ETHUSDT",
-    "SOL":     "BINANCE:SOLUSDT",
-}
-
-
-@app.get("/api/candles/{symbol}")
-async def proxy_candles(symbol: str, resolution: str = "D", from_ts: int = 0, to_ts: int = 0):
-    sym    = symbol.upper()
-    key    = f"candles:{sym}:{resolution}:{from_ts}"
-    cached = _cache_get(key)
-    if cached is not None:
-        return cached
-
-    crypto_sym = _CRYPTO_SYMBOLS.get(sym)
-    if crypto_sym:
-        r = await _http_client.get(f"{FH_BASE}/crypto/candle",
-                                   params={"symbol": crypto_sym, "resolution": resolution,
-                                           "from": from_ts, "to": to_ts, "token": FINNHUB_KEY})
-    else:
-        r = await _http_client.get(f"{FH_BASE}/stock/candle",
-                                   params={"symbol": sym, "resolution": resolution,
-                                           "from": from_ts, "to": to_ts, "token": FINNHUB_KEY})
-
-    data = r.json()
-    ttl  = 60 if resolution in ("1", "5", "15") else 300
-    _cache_set(key, data, ttl)
-    return data
-
-
 @app.get("/api/live/benchmarks")
 async def live_benchmarks():
     return dict(_live_prices)
-
-
-# Aliases so clients can request e.g. /api/live/price/BTC
-_LIVE_ALIASES = {
-    "BTC":     "BINANCE:BTCUSDT",
-    "BTCUSD":  "BINANCE:BTCUSDT",
-    "BTCUSDT": "BINANCE:BTCUSDT",
-}
-
-
-@app.get("/api/live/price/{symbol}")
-async def live_price(symbol: str):
-    sym      = symbol.upper()
-    resolved = _LIVE_ALIASES.get(sym, sym)
-    entry    = _live_prices.get(resolved)
-    if entry:
-        return entry
-    # Fall back to cached REST quote
-    key    = f"quote:{sym}"
-    cached = _cache_get(key)
-    if cached and cached.get("c"):
-        return {"price": cached["c"], "change_pct": cached.get("dp")}
-    r    = await _http_client.get(f"{FH_BASE}/quote",
-                                  params={"symbol": sym, "token": FINNHUB_KEY})
-    data = r.json()
-    if data.get("c"):
-        _cache_set(key, data, _TTL_QUOTE)
-        return {"price": data["c"], "change_pct": data.get("dp")}
-    return {}
 
 
 # ---------------------------------------------------------------------------

@@ -18,15 +18,6 @@ import datetime
 import threading
 import time
 
-# ---------------------------------------------------------------------------
-# Symbol maps
-# ---------------------------------------------------------------------------
-
-# Maps user-facing tickers to the server's /api/live/price key
-_LIVE_SYMBOL_MAP = {
-    "BTC":     "BTC",    # server aliases BTC → BINANCE:BTCUSDT
-    "BTCUSD":  "BTC",
-}
 
 def server_get(path: str, params: dict = None) -> dict:
     """GET request to the Brodberg server. Used by all commands that need market data."""
@@ -110,16 +101,13 @@ def get_quote(ticker):
 # Timeframe configuration (used by GIP command)
 # ---------------------------------------------------------------------------
 
-# Maps user-facing period tokens to Finnhub (resolution, days_back) pairs.
-# resolution: "1"|"5"|"15"|"30"|"60" (minutes), "D", "W", "M"
-# days_back:  integer or "ytd" for year-to-date
+# Maps user-facing period tokens to (yfinance period, yfinance interval) tuples.
 TIMEFRAME_MAP = {
-    "RT":  {"resolution": "1",  "days": 1},
-    "1W":  {"resolution": "60", "days": 7},
-    "1M":  {"resolution": "D",  "days": 30},
-    "3M":  {"resolution": "D",  "days": 90},
-    "1Y":  {"resolution": "W",  "days": 365},
-    "YTD": {"resolution": "D",  "days": "ytd"},
+    "1W":  ("5d",   "1d"),
+    "1M":  ("1mo",  "1d"),
+    "3M":  ("3mo",  "1d"),
+    "1Y":  ("1y",   "1wk"),
+    "YTD": ("ytd",  "1d"),
 }
 DEFAULT_TIMEFRAME = "1Y"
 VALID_TIMEFRAMES  = list(TIMEFRAME_MAP.keys())
@@ -127,16 +115,21 @@ VALID_TIMEFRAMES  = list(TIMEFRAME_MAP.keys())
 
 def get_candles(ticker, timeframe="1Y"):
     """
-    Fetch historical/intraday closing prices via the Brodberg server (Finnhub).
+    Fetch historical closing prices via yfinance.
 
     Parameters
     ----------
-    ticker    : str  — e.g. "AAPL" or "BTC"
+    ticker    : str  — e.g. "AAPL"
     timeframe : str  — one of VALID_TIMEFRAMES (default: DEFAULT_TIMEFRAME)
 
     Returns a dict with keys "symbol", "prices", "dates", "timeframe",
     or raises on failure.
     """
+    try:
+        import yfinance as yf
+    except ImportError:
+        raise ImportError("yfinance not installed. Run: pip install yfinance")
+
     tf = timeframe.upper()
     if tf not in TIMEFRAME_MAP:
         raise ValueError(
@@ -144,26 +137,14 @@ def get_candles(ticker, timeframe="1Y"):
             f"Valid options: {', '.join(VALID_TIMEFRAMES)}"
         )
 
-    cfg        = TIMEFRAME_MAP[tf]
-    resolution = cfg["resolution"]
-    days       = cfg["days"]
-    now_ts     = int(time.time())
+    period, interval = TIMEFRAME_MAP[tf]
+    hist = yf.Ticker(ticker.upper()).history(period=period, interval=interval)
 
-    if days == "ytd":
-        ytd_start  = datetime.date(datetime.date.today().year, 1, 1)
-        from_ts    = int(datetime.datetime(ytd_start.year, ytd_start.month, ytd_start.day).timestamp())
-    else:
-        from_ts    = now_ts - int(days) * 86400
-
-    raw = server_get(f"/api/candles/{ticker.upper()}",
-                     params={"resolution": resolution, "from_ts": from_ts, "to_ts": now_ts})
-
-    if raw.get("s") != "ok" or not raw.get("c"):
+    if hist.empty:
         raise ValueError(f"No data returned for '{ticker}'. Check the ticker symbol.")
 
-    closes   = [round(float(c), 2) for c in raw["c"]]
-    date_fmt = "%H:%M" if tf == "RT" else "%Y-%m-%d"
-    dates    = [datetime.datetime.fromtimestamp(t).strftime(date_fmt) for t in raw["t"]]
+    closes = [round(float(c), 2) for c in hist["Close"].tolist()]
+    dates  = [d.strftime("%Y-%m-%d") for d in hist.index.to_pydatetime()]
 
     return {
         "symbol":    ticker.upper(),
@@ -385,46 +366,6 @@ def draw_news_ticker(stdscr, width, scroll_offset, colors):
         stdscr.attroff(colors["dim"])
     except Exception:
         pass
-
-
-# ---------------------------------------------------------------------------
-# Real-time chart refresh — background thread for GIP RT mode
-# ---------------------------------------------------------------------------
-
-def _rt_worker(cache: dict, stop: threading.Event) -> None:
-    """Append live price ticks to a GIP RT cache dict every 3 seconds."""
-    ticker   = cache.get("ticker", "").upper()
-    live_sym = _LIVE_SYMBOL_MAP.get(ticker, ticker)
-
-    while not stop.is_set():
-        try:
-            entry = server_get(f"/api/live/price/{live_sym}")
-            price = entry.get("price")
-            if price:
-                data = cache.get("data")
-                if data and (not data["prices"] or data["prices"][-1] != float(price)):
-                    data["prices"].append(float(price))
-                    data["dates"].append(datetime.datetime.now().strftime("%H:%M"))
-        except Exception:
-            pass
-        stop.wait(3)
-
-
-def start_rt_refresh(cache: dict) -> None:
-    """Start the RT background refresh thread; stores refs in cache."""
-    stop_event = threading.Event()
-    t = threading.Thread(target=_rt_worker, args=(cache, stop_event), daemon=True)
-    cache["_rt_stop"]   = stop_event
-    cache["_rt_thread"] = t
-    t.start()
-
-
-def stop_rt_refresh(cache: dict) -> None:
-    """Stop the RT background refresh thread if one is running."""
-    stop_event = cache.pop("_rt_stop", None)
-    if stop_event:
-        stop_event.set()
-    cache.pop("_rt_thread", None)
 
 
 # ---------------------------------------------------------------------------
