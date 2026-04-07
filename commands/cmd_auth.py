@@ -9,7 +9,6 @@ Commands:
   LOGOUT                           — clear local session
   PROFILE                          — show your own profile
   PROFILE <username>               — show another user's profile
-  SERVER <url>                     — set the server URL
 
 fetch(parts)                  -> cache dict
 render(stdscr, cache, colors) -> None

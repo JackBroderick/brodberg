@@ -27,19 +27,19 @@ import datetime
 
 COMMODITIES = {
     "ENERGY": [
-        ("WTI Crude",   "CL=F", "NYMEX:CL1!",  "/bbl"),
-        ("Brent Crude", "BZ=F", "NYMEX:BB1!",  "/bbl"),
-        ("Natural Gas", "NG=F", "NYMEX:NG1!",  "/MMBtu"),
+        ("WTI Crude",   "CL=F", "/bbl"),
+        ("Brent Crude", "BZ=F", "/bbl"),
+        ("Natural Gas", "NG=F", "/MMBtu"),
     ],
     "METALS": [
-        ("Gold",        "GC=F", "COMEX:GC1!",  "/oz"),
-        ("Silver",      "SI=F", "COMEX:SI1!",  "/oz"),
-        ("Copper",      "HG=F", "COMEX:HG1!",  "/lb"),
+        ("Gold",        "GC=F", "/oz"),
+        ("Silver",      "SI=F", "/oz"),
+        ("Copper",      "HG=F", "/lb"),
     ],
     "GRAINS": [
-        ("Wheat",       "ZW=F", "CBOT:ZW1!",   "/bu"),
-        ("Corn",        "ZC=F", "CBOT:ZC1!",   "/bu"),
-        ("Soybeans",    "ZS=F", "CBOT:ZS1!",   "/bu"),
+        ("Wheat",       "ZW=F", "/bu"),
+        ("Corn",        "ZC=F", "/bu"),
+        ("Soybeans",    "ZS=F", "/bu"),
     ],
 }
 
@@ -74,7 +74,7 @@ def fetch(parts: list) -> dict:
     result = {}
     for group, items in COMMODITIES.items():
         result[group] = []
-        for (name, yf_ticker, fh_symbol, unit) in items:
+        for (name, yf_ticker, unit) in items:
             data = _fetch_yf_commodity(yf_ticker)
             result[group].append({
                 "name": name, "unit": unit, "data": data,

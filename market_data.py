@@ -22,14 +22,12 @@ import datetime
 import threading
 import time
 
-import requests as _requests
-import brodberg_session
-
-
 def server_get(path: str, params: dict = None) -> dict:
     """GET request to the Brodberg server. Used by all commands that need market data."""
+    import requests
+    import brodberg_session
     url = f"{brodberg_session.get_server_url()}{path}"
-    r   = _requests.get(url, params=params, timeout=35)   # 35s covers Render cold starts
+    r   = requests.get(url, params=params, timeout=35)   # 35s covers Render cold starts
     r.raise_for_status()
     return r.json()
 

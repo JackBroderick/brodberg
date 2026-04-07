@@ -1,33 +1,41 @@
  General
- 
+
   HELP               - Displays list of all available commands
   CLEAR              - Clears the terminal
   EXIT               - Closes the terminal
   CL                 - Version Change Log
- 
+
  Equity
- 
+
   Q <Ticker>                      - Quick quote
   GIP <Ticker> <Timeframe>        - Price chart  |  Timeframes: 1W 1M 3M YTD 1Y
   DES <Ticker>                    - Security description and detail
   FA <Ticker> [IS|BS|CF] [ANNUAL] - Fundamental analysis (financial statements)
- 
+
  Macro
- 
+
   RATES              - U.S. Treasury yield curve + inversion status
   COMD               - Commodities dashboard (Energy, Metals, Grains)
   FX [G10|EM]        - FX major pairs vs USD  |  Screens: G10 (default), EM
   SHIP <Lane>        - Live AIS vessel tracking  |  Lanes: HORMUZ
- 
+
+ Account
+
+  REGISTER <username> <password>  - Create a Brodberg account
+  LOGIN <username> <password>     - Sign in
+  LOGOUT                          - Sign out
+  PROFILE                         - View your profile
+  PROFILE <username>              - View another user's profile
+
  Navigation
- 
+
   ` (backtick)       - Toggle INPUT mode / PANE mode
- 
+
   INPUT mode
     Type a command and press Enter to run it.
     After Enter the terminal auto-switches to PANE mode.
     Press ` at any time to return to INPUT mode.
- 
+
   PANE mode  (active after every command)
     Z                - Toggle zoom  (focused pane fills screen; others as tabs)
     Tab              - Cycle focused pane
