@@ -32,9 +32,9 @@ def server_get(path: str, params: dict = None) -> dict:
 # ---------------------------------------------------------------------------
 
 BENCHMARKS = [
-    {"symbol": "^GSPC",           "label": "S&P 500"},
-    {"symbol": "^IXIC",           "label": "NASDAQ"},
-    {"symbol": "^DJI",            "label": "DOW"},
+    {"symbol": "SPY",             "label": "S&P 500"},
+    {"symbol": "QQQ",             "label": "NASDAQ"},
+    {"symbol": "DIA",             "label": "DOW"},
     {"symbol": "GLD",             "label": "GOLD"},
     {"symbol": "SLV",             "label": "SILVER"},
     {"symbol": "BNO",             "label": "BRENT"},

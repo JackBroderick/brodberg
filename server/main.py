@@ -109,7 +109,7 @@ _live_prices: dict = {}   # symbol -> {"price": float, "change_pct": float|None}
 _WS_BENCH   = ["BINANCE:BTCUSDT"]
 
 # Symbols polled via REST every N seconds (indices have no trade feed)
-_REST_BENCH = ["^GSPC", "^IXIC", "^DJI", "GLD", "SLV", "BNO", "UNG"]
+_REST_BENCH = ["SPY", "QQQ", "DIA", "GLD", "SLV", "BNO", "UNG"]
 
 _REST_POLL_INTERVAL = 15  # seconds — indices tick every ~15s during market hours
 
