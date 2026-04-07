@@ -83,6 +83,7 @@ _TTL_COMPANY        = 3600
 _TTL_YIELD_CURVE    = 3600
 _TTL_FOREX_RATES    = 60
 _TTL_FOREX_CANDLES  = 300
+_TTL_IPO            = 3600    # 1 hour
 _TTL_PEERS          = 86400   # 24 hours — peer groups rarely change
 _TTL_EXECUTIVES     = 86400
 _TTL_DIVIDENDS      = 3600
@@ -474,6 +475,24 @@ async def proxy_forex_candles(symbol: str, resolution: str = "D",
                                        "token": FINNHUB_KEY})
     data = r.json()
     _cache_set(key, data, _TTL_FOREX_CANDLES)
+    return data
+
+
+@app.get("/api/ipo")
+async def proxy_ipo(frm: str = "", to: str = ""):
+    from datetime import date, timedelta
+    if not frm:
+        frm = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+    if not to:
+        to  = (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
+    key = f"ipo:{frm}:{to}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/calendar/ipo",
+                               params={"from": frm, "to": to, "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_IPO)
     return data
 
 

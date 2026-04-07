@@ -8,6 +8,12 @@
 ## Equity
 
   Q <Ticker>                       - Live quote
+
+  IPO [from] [to]                  - IPO Calendar (past 30d + next 90d by default)
+                                     e.g. IPO 2025-01-01 2025-06-30
+                                     ↑ ↓  navigate list
+                                     Enter  expand / collapse details
+                                     ← →  filter by status: ALL / PRICED / EXPECTED / FILED / WITHDRAWN
   GIP <Ticker> [Timeframe]         - Price chart
                                      Timeframes: 1W  1M  3M  YTD  1Y  (default 1Y)
                                      ← → to cycle timeframes in pane mode

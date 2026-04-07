@@ -55,6 +55,7 @@ from commands import cmd_rates
 from commands import cmd_comd
 from commands import cmd_fx
 from commands import cmd_user
+from commands import cmd_ipo
 from commands import cmd_peers
 from commands import cmd_exec
 from commands import cmd_div
@@ -138,6 +139,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_user.fetch,
         "render":      cmd_user.render,
         "on_keypress": cmd_user.on_keypress,
+    },
+    # ── IPO Calendar ─────────────────────────────────────────────────────────
+    {
+        "prefix":      "IPO",
+        "exact":       False,
+        "fetch":       cmd_ipo.fetch,
+        "render":      cmd_ipo.render,
+        "on_keypress": cmd_ipo.on_keypress,
     },
     # ── Fundamental / ownership data ─────────────────────────────────────────
     {
