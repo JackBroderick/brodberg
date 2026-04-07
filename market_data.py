@@ -24,7 +24,7 @@ import datetime
 import threading
 import time
 
-API_KEY  = "d72rcr9r01qlfd9oa630d72rcr9r01qlfd9oa63g"
+from api_keys import FINNHUB_API_KEY as API_KEY
 BASE_URL = "https://finnhub.io/api/v1"
 
 # ---------------------------------------------------------------------------

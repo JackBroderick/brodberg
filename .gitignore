@@ -1,3 +1,6 @@
+# API keys — never commit
+api_keys.py
+
 # Python
 __pycache__/
 *.py[cod]

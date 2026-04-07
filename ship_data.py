@@ -39,7 +39,7 @@ import asyncio
 import os
 import sys
 
-AISSTREAM_API_KEY = "bd272fc2a52e1b6a9142c79f94d6f9eddbe8dc11"
+from api_keys import AISSTREAM_API_KEY
 
 
 # ---------------------------------------------------------------------------
