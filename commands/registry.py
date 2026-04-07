@@ -54,7 +54,7 @@ from commands import cmd_fa
 from commands import cmd_rates
 from commands import cmd_comd
 from commands import cmd_fx
-from commands import cmd_auth
+from commands import cmd_user
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -125,30 +125,13 @@ COMMAND_REGISTRY = [
         "render":      cmd_fx.render,
         "on_keypress": cmd_fx.on_keypress,
     },
-    # ── Online account commands ───────────────────────────────────────────────
+    # ── User account command ─────────────────────────────────────────────────
     {
-        "prefix": "REGISTER",
-        "exact":  False,
-        "fetch":  cmd_auth.fetch,
-        "render": cmd_auth.render,
-    },
-    {
-        "prefix": "LOGIN",
-        "exact":  False,
-        "fetch":  cmd_auth.fetch,
-        "render": cmd_auth.render,
-    },
-    {
-        "prefix": "LOGOUT",
-        "exact":  True,
-        "fetch":  cmd_auth.fetch,
-        "render": cmd_auth.render,
-    },
-    {
-        "prefix": "PROFILE",
-        "exact":  False,
-        "fetch":  cmd_auth.fetch,
-        "render": cmd_auth.render,
+        "prefix":      "USER",
+        "exact":       False,
+        "fetch":       cmd_user.fetch,
+        "render":      cmd_user.render,
+        "on_keypress": cmd_user.on_keypress,
     },
 ]
 

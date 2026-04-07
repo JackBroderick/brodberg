@@ -21,11 +21,12 @@
 
  Account
 
-  REGISTER <username> <password>  - Create a Brodberg account
-  LOGIN <username> <password>     - Sign in
-  LOGOUT                          - Sign out
-  PROFILE                         - View your profile
-  PROFILE <username>              - View another user's profile
+  USER                  - View your profile
+  USER login            - Sign in  (interactive form)
+  USER register         - Create an account  (interactive form)
+  USER logout           - Sign out
+  USER edit             - Edit your bio and location  (interactive form)
+  USER <username>       - View another user's profile
 
  Navigation
 

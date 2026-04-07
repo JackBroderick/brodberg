@@ -246,26 +246,38 @@ def main(stdscr):
         # PANE MODE — navigation keys control panes, not the command bar
         # ══════════════════════════════════════════════════════════════════
         else:
-            # Z — toggle zoom
-            if key in (ord("z"), ord("Z")):
-                zoomed = not zoomed
+            pane      = panes[focused_pane]
+            form_mode = pane["cache"].get("form_mode", False)
 
-            # Tab — cycle focused pane
-            elif key == 9:
-                stdscr.nodelay(True)
-                while stdscr.getch() != -1:
-                    pass
-                focused_pane = (focused_pane + 1) % MAX_PANES
-
-            # Arrow keys — route to active command's on_keypress handler
-            elif key in (curses.KEY_UP, curses.KEY_DOWN,
-                         curses.KEY_LEFT, curses.KEY_RIGHT):
-                pane = panes[focused_pane]
+            if form_mode and key != -1:
+                # Active pane has an interactive form — route ALL keystrokes
+                # to its on_keypress handler (typing, backspace, Enter, arrows).
                 pane["cache"] = dispatch_keypress(
                     key,
                     pane["activecommand"],
                     pane["cache"],
                 )
+
+            else:
+                # Z — toggle zoom
+                if key in (ord("z"), ord("Z")):
+                    zoomed = not zoomed
+
+                # Tab — cycle focused pane
+                elif key == 9:
+                    stdscr.nodelay(True)
+                    while stdscr.getch() != -1:
+                        pass
+                    focused_pane = (focused_pane + 1) % MAX_PANES
+
+                # Arrow keys — route to active command's on_keypress handler
+                elif key in (curses.KEY_UP, curses.KEY_DOWN,
+                             curses.KEY_LEFT, curses.KEY_RIGHT):
+                    pane["cache"] = dispatch_keypress(
+                        key,
+                        pane["activecommand"],
+                        pane["cache"],
+                    )
 
 
 # ---------------------------------------------------------------------------
