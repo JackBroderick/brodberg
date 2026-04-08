@@ -269,33 +269,17 @@ def render(stdscr, cache: dict, colors: dict) -> None:
                       else colors["dim"])
 
         if is_sel:
-            try:
-                stdscr.attron(colors["highlight"] | curses.A_BOLD)
-                stdscr.addstr(r, 0, " " * (width - 1))
-                stdscr.attroff(colors["highlight"] | curses.A_BOLD)
-            except Exception:
-                pass
-            hl = colors["highlight"] | curses.A_BOLD
-
-            def _rp(col, text, _hl=hl):
-                try:
-                    stdscr.attron(_hl)
-                    stdscr.addstr(r, col, text)
-                    stdscr.attroff(_hl)
-                except Exception:
-                    pass
-
-            _rp(C_SYM,   f"{sym:<7}")
-            _rp(C_TYPE,  f"{typ:<5}")
-            _rp(C_STR,   f"{strike:<7}")
-            _rp(C_EXP,   f"{expiry:<11}")
-            _rp(C_VOL,   f"{vol:<9}")
-            _rp(C_OI,    f"{oi:<9}")
-            _rp(C_VOLOI, f"{voi:<7}")
-            _rp(C_IV,    f"{iv:<9}")
-            if width >= 88:  _rp(C_STPX,  f"{stpx:<9}")
-            if width >= 98:  _rp(C_DTE,   f"{dte:<7}")
-            if width >= 108: _rp(C_DELTA, f"{delta:<8}")
+            _put(stdscr, r, C_SYM,   f"{sym:<7}",    colors["orange"], bold=True)
+            _put(stdscr, r, C_TYPE,  f"{typ:<5}",    colors["orange"], bold=True)
+            _put(stdscr, r, C_STR,   f"{strike:<7}", colors["orange"], bold=True)
+            _put(stdscr, r, C_EXP,   f"{expiry:<11}", colors["orange"], bold=True)
+            _put(stdscr, r, C_VOL,   f"{vol:<9}",    colors["orange"], bold=True)
+            _put(stdscr, r, C_OI,    f"{oi:<9}",     colors["orange"], bold=True)
+            _put(stdscr, r, C_VOLOI, f"{voi:<7}",    colors["orange"], bold=True)
+            _put(stdscr, r, C_IV,    f"{iv:<9}",     colors["orange"], bold=True)
+            if width >= 88:  _put(stdscr, r, C_STPX,  f"{stpx:<9}",  colors["orange"], bold=True)
+            if width >= 98:  _put(stdscr, r, C_DTE,   f"{dte:<7}",   colors["orange"], bold=True)
+            if width >= 108: _put(stdscr, r, C_DELTA, f"{delta:<8}", colors["orange"], bold=True)
         else:
             _put(stdscr, r, C_SYM,   f"{sym:<7}",    colors["orange"])
             _put(stdscr, r, C_TYPE,  f"{typ:<5}",    type_color)
@@ -353,7 +337,7 @@ def _render_detail(stdscr, r: int, row_data: dict,
     _put(stdscr, r, 2, sym, colors["orange"], bold=True)
     if name:
         _put(stdscr, r, 2 + len(sym) + 2, name[:width - len(sym) - 10],
-             colors["header"], bold=True)
+             colors["orange"], bold=True)
     r += 1
     _put(stdscr, r, 2, typ, type_color, bold=True); r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1

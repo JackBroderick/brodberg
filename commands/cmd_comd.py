@@ -148,7 +148,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
 
     for group_name, items in groups.items():
         _put(stdscr, r, 0, sep, colors["dim"]); r += 1
-        _put(stdscr, r, 2, f" {group_name} ", colors["header"], bold=True); r += 1
+        _put(stdscr, r, 2, f" {group_name} ", colors["orange"], bold=True); r += 1
 
         for item in items:
             name = item["name"]

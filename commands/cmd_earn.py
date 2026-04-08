@@ -252,31 +252,15 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         chg_col    = _chg_color(row_data, colors)
 
         if is_sel:
-            try:
-                stdscr.attron(colors["highlight"] | curses.A_BOLD)
-                stdscr.addstr(r, 0, " " * (width - 1))
-                stdscr.attroff(colors["highlight"] | curses.A_BOLD)
-            except Exception:
-                pass
-            hl = colors["highlight"] | curses.A_BOLD
-
-            def _rp(col, text, _hl=hl):
-                try:
-                    stdscr.attron(_hl)
-                    stdscr.addstr(r, col, text)
-                    stdscr.attroff(_hl)
-                except Exception:
-                    pass
-
-            _rp(C_SYM,   f"{sym:<7}")
-            _rp(C_TIME,  f"{tc:<5}")
-            _rp(C_NAME,  f"{name:<{name_w}}")
-            _rp(C_DATE,  f"{date:<11}")
-            _rp(C_PRICE, f"{price:<9}")
-            _rp(C_CHG,   f"{chg:<9}")
-            _rp(C_IVRK,  f"{ivrk:<9}")
+            _put(stdscr, r, C_SYM,   f"{sym:<7}",        colors["orange"], bold=True)
+            _put(stdscr, r, C_TIME,  f"{tc:<5}",          colors["orange"], bold=True)
+            _put(stdscr, r, C_NAME,  f"{name:<{name_w}}", colors["orange"], bold=True)
+            _put(stdscr, r, C_DATE,  f"{date:<11}",       colors["orange"], bold=True)
+            _put(stdscr, r, C_PRICE, f"{price:<9}",       colors["orange"], bold=True)
+            _put(stdscr, r, C_CHG,   f"{chg:<9}",         colors["orange"], bold=True)
+            _put(stdscr, r, C_IVRK,  f"{ivrk:<9}",        colors["orange"], bold=True)
             if C_IMPL < width - 4:
-                _rp(C_IMPL, f"{impl:<9}")
+                _put(stdscr, r, C_IMPL, f"{impl:<9}",     colors["orange"], bold=True)
         else:
             _put(stdscr, r, C_SYM,   f"{sym:<7}",         colors["orange"])
             _put(stdscr, r, C_TIME,  f"{tc:<5}",           time_color, bold=True)
@@ -329,7 +313,7 @@ def _render_detail(stdscr, r: int, row_data: dict,
     _put(stdscr, r, 2, sym, colors["orange"], bold=True)
     if name:
         _put(stdscr, r, 2 + len(sym) + 2, name[:width - len(sym) - 10],
-             colors["header"], bold=True)
+             colors["orange"], bold=True)
     r += 1
     _put(stdscr, r, 2, tc, time_color, bold=True); r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1

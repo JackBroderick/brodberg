@@ -50,8 +50,9 @@
                        Screens: G10 (default)  EM
                        ← → to switch screen
 
-  SHIP <Lane>        - Live AIS vessel tracking
-                       Lanes: HORMUZ
+  OMON <Ticker>      - Options chain monitor
+                       ← →  cycle expiration dates   ↑ ↓  scroll strikes
+                       ITM calls shown in green, ITM puts in red
 
   UO                 - Unusual options activity (scraped daily at 4:05 PM ET)
                        ↑ ↓  navigate   ← →  filter CALL / PUT
@@ -61,6 +62,9 @@
                        ↑ ↓  navigate   ← →  filter BMO / AMC
                        Enter  expand / collapse detail
                        Enter  expand / collapse contract detail
+
+  SHIP <Lane>        - Live AIS vessel tracking
+                       Lanes: HORMUZ
 
   N                  - Market news feed (all headlines)
 

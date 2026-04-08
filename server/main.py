@@ -89,6 +89,7 @@ _TTL_EXECUTIVES     = 86400
 _TTL_DIVIDENDS      = 3600
 _TTL_INSIDER        = 1800    # 30 minutes
 _TTL_SENTIMENT      = 300
+_TTL_OPTIONS        = 300     # 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -1040,6 +1041,19 @@ async def proxy_sentiment(symbol: str):
                                params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
     data = r.json()
     _cache_set(key, data, _TTL_SENTIMENT)
+    return data
+
+
+@app.get("/api/options/{symbol}")
+async def proxy_options(symbol: str):
+    key = f"options:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/stock/option-chain",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_OPTIONS)
     return data
 
 

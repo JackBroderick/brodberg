@@ -123,7 +123,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     r = 4
     put(r,     0, sep,                                              colors["dim"])
     put(r + 1, 0, f"   {symbol}",                                  colors["orange"], bold=True)
-    put(r + 1, 8, "  Insider Transactions",                        colors["header"], bold=True)
+    put(r + 1, 8, "  Insider Transactions",                        colors["orange"], bold=True)
     put(r + 2, 0, f"   {len(txns)} transactions on record",        colors["dim"])
     put(r + 3, 0, sep,                                              colors["dim"])
 
@@ -153,11 +153,11 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         is_buy = str(code).strip().upper() == "P"
         txn_color = colors["positive"] if is_buy else colors["negative"]
 
-        put(row, C_DATE,   f"{date:<11}",   colors["header"])
+        put(row, C_DATE,   f"{date:<11}",   colors["orange"])
         put(row, C_NAME,   f"{name:<21}",   colors["dim"])
         put(row, C_TYPE,   f"{label:<11}",  txn_color)
         put(row, C_SHARES, f"{shares:<11}", colors["orange"])
-        put(row, C_PRICE,  price,           colors["header"])
+        put(row, C_PRICE,  price,           colors["orange"])
         row += 1
 
     put(row, 0, sep, colors["dim"])

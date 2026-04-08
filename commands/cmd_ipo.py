@@ -294,30 +294,13 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         s_label = _status_label(status)[:9]
 
         if is_sel:
-            # Fill entire row with highlight background
-            try:
-                stdscr.attron(colors["highlight"] | curses.A_BOLD)
-                stdscr.addstr(r, 0, " " * (width - 1))
-                stdscr.attroff(colors["highlight"] | curses.A_BOLD)
-            except Exception:
-                pass
-            row_attr = colors["highlight"] | curses.A_BOLD
-
-            def _row_put(col, text):
-                try:
-                    stdscr.attron(row_attr)
-                    stdscr.addstr(r, col, text)
-                    stdscr.attroff(row_attr)
-                except Exception:
-                    pass
-
-            _row_put(C_DATE,   f"{date:<11}")
-            _row_put(C_NAME,   f"{name:<31}")
-            _row_put(C_SYM,    f"{sym:<7}")
-            _row_put(C_SHARES, f"{shares:<11}")
-            _row_put(C_PRICE,  f"{price:<10}")
+            _put(stdscr, r, C_DATE,   f"{date:<11}",   colors["orange"], bold=True)
+            _put(stdscr, r, C_NAME,   f"{name:<31}",   colors["orange"], bold=True)
+            _put(stdscr, r, C_SYM,    f"{sym:<7}",     colors["orange"], bold=True)
+            _put(stdscr, r, C_SHARES, f"{shares:<11}", colors["orange"], bold=True)
+            _put(stdscr, r, C_PRICE,  f"{price:<10}",  colors["orange"], bold=True)
             if C_STATUS < width - 4:
-                _row_put(C_STATUS, s_label)
+                _put(stdscr, r, C_STATUS, s_label,     colors["orange"], bold=True)
         else:
             # Normal row: white on black, status colored
             _put(stdscr, r, C_DATE,   f"{date:<11}",   colors["dim"])
@@ -363,7 +346,7 @@ def _render_detail(stdscr, r: int, ipo: dict, colors: dict, sep: str) -> None:
 
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
     _put(stdscr, r, 2, f"{symbol}", colors["orange"], bold=True)
-    _put(stdscr, r, 2 + len(symbol) + 2, name, colors["header"], bold=True)
+    _put(stdscr, r, 2 + len(symbol) + 2, name, colors["orange"], bold=True)
     r += 1
     _put(stdscr, r, 2, f"Status: ", colors["dim"])
     _put(stdscr, r, 10, s_label, s_color, bold=True)

@@ -66,13 +66,17 @@ def init_colors() -> dict:
 
     orange = _best_orange()
 
+    # Use xterm-256 index 16 (true black, not subject to terminal theme remapping)
+    # as the foreground for orange-highlighted text so it renders as actual black.
+    dark = 16 if curses.COLORS >= 256 else curses.COLOR_BLACK
+
     curses.init_pair(1, orange,            curses.COLOR_BLACK)  # orange on black
-    curses.init_pair(2, curses.COLOR_BLACK, orange)             # black on orange
+    curses.init_pair(2, dark,              orange)              # black on orange
     curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_BLACK) # white on black
     curses.init_pair(4, curses.COLOR_GREEN, curses.COLOR_BLACK) # green on black
     curses.init_pair(5, curses.COLOR_RED,   curses.COLOR_BLACK) # red on black
     curses.init_pair(6, curses.COLOR_BLUE,  curses.COLOR_BLUE)  # blue on blue (water)
-    curses.init_pair(7, curses.COLOR_BLACK, orange)             # black on orange (land label)
+    curses.init_pair(7, dark,              orange)              # black on orange (land label)
     curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLUE)  # white on blue (water label)
     curses.init_pair(9,  curses.COLOR_GREEN, curses.COLOR_BLUE)  # green on blue (ship on water)
     curses.init_pair(10, curses.COLOR_BLACK, curses.COLOR_WHITE) # black on white (selected row)

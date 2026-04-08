@@ -43,7 +43,8 @@ def draw_header(stdscr, width: int, now: datetime.datetime, colors: dict) -> Non
 # ---------------------------------------------------------------------------
 
 def draw_footer(stdscr, height: int, width: int, command: str,
-                colors: dict, input_focused: bool = True) -> None:
+                colors: dict, input_focused: bool = True,
+                cursor_blink: bool = False) -> None:
     """
     Draw the full-width footer / command bar on the last row.
 
@@ -53,6 +54,8 @@ def draw_footer(stdscr, height: int, width: int, command: str,
     is clipped on the left when it overflows.
 
     Shows a bright prompt when input is focused, dim when in pane mode.
+    A software block cursor blinks at the end of the command when
+    input_focused and cursor_blink are both True.
     """
     prompt     = " Command > "
     prompt_len = len(prompt)
@@ -76,6 +79,17 @@ def draw_footer(stdscr, height: int, width: int, command: str,
         stdscr.attroff(colors["header"])
     else:
         stdscr.attroff(colors["dim"])
+
+    # Software cursor — draw a "|" in the bar color so it blinks in/out cleanly
+    if input_focused and cursor_blink:
+        cursor_col = prompt_len + len(visible_cmd)
+        if cursor_col < width - 1:
+            try:
+                stdscr.attron(colors["dim"])
+                stdscr.addstr(height - 1, cursor_col, "_")
+                stdscr.attroff(colors["dim"])
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

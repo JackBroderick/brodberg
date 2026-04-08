@@ -143,7 +143,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     # ── Header block ─────────────────────────────────────────────────────
     put(r,     0, sep,                                      colors["dim"])
     put(r + 1, 0, f"   {d['symbol']}",                     colors["orange"], bold=True)
-    put(r + 1, 8, f"  {d['name']}",                        colors["header"], bold=True)
+    put(r + 1, 8, f"  {d['name']}",                        colors["orange"], bold=True)
     put(r + 2, 0, f"   {d['exchange']}  |  {d['country']}  |  {d['currency']}",
         colors["dim"])
     put(r + 3, 0, sep,                                      colors["dim"])

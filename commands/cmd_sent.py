@@ -125,7 +125,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     r = 4
     put(r,     0, sep,                        colors["dim"])
     put(r + 1, 0, f"   {symbol}",             colors["orange"], bold=True)
-    put(r + 1, 8, "  News Sentiment",         colors["header"], bold=True)
+    put(r + 1, 8, "  News Sentiment",         colors["orange"], bold=True)
     put(r + 2, 0, "   Powered by Finnhub NLP", colors["dim"])
     put(r + 3, 0, sep,                        colors["dim"])
 
@@ -181,7 +181,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     row += 1
 
     # ── Buzz ─────────────────────────────────────────────────────────────
-    put(row, 2, "BUZZ METRICS", colors["header"], bold=True)
+    put(row, 2, "BUZZ METRICS", colors["orange"], bold=True)
     row += 1
 
     label_value(row, "Articles This Week:",      str(int(articles)),          colors["orange"])

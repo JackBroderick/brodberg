@@ -184,28 +184,12 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         source   = (article.get("source") or "")[:14]
 
         if is_sel:
-            try:
-                stdscr.attron(colors["highlight"] | curses.A_BOLD)
-                stdscr.addstr(r, 0, " " * (width - 1))
-                stdscr.attroff(colors["highlight"] | curses.A_BOLD)
-            except Exception:
-                pass
-            hl_attr = colors["highlight"] | curses.A_BOLD
-
-            def _row_put(col, text):
-                try:
-                    stdscr.attron(hl_attr)
-                    stdscr.addstr(r, col, text)
-                    stdscr.attroff(hl_attr)
-                except Exception:
-                    pass
-
-            _row_put(C_HEADLINE, f"{headline:<{headline_w}}")
-            _row_put(C_DATE,     f"{date_s:<8}")
-            _row_put(C_TIME,     f"{time_s:<8}")
-            _row_put(C_TICKER,   f"{sym:<7}")
+            _put(stdscr, r, C_HEADLINE, f"{headline:<{headline_w}}", colors["orange"], bold=True)
+            _put(stdscr, r, C_DATE,     f"{date_s:<8}",              colors["orange"], bold=True)
+            _put(stdscr, r, C_TIME,     f"{time_s:<8}",              colors["orange"], bold=True)
+            _put(stdscr, r, C_TICKER,   f"{sym:<7}",                 colors["orange"], bold=True)
             if C_SOURCE < width - 4:
-                _row_put(C_SOURCE, f"{source:<14}")
+                _put(stdscr, r, C_SOURCE, f"{source:<14}",           colors["orange"], bold=True)
         else:
             _put(stdscr, r, C_HEADLINE, f"{headline:<{headline_w}}", colors["dim"])
             _put(stdscr, r, C_DATE,     f"{date_s:<8}",              colors["dim"])
@@ -260,7 +244,7 @@ def _render_detail(stdscr, r: int, article: dict, colors: dict, sep: str, width:
         lines.append(line)
 
     for idx, hl in enumerate(lines[:3]):
-        color = colors["header"] if idx == 0 else colors["dim"]
+        color = colors["orange"] if idx == 0 else colors["dim"]
         _put(stdscr, r, 2, hl, color, bold=(idx == 0))
         r += 1
     r += 1

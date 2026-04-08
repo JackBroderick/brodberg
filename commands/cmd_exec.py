@@ -94,7 +94,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     r = 4
     put(r,     0, sep,                                           colors["dim"])
     put(r + 1, 0, f"   {symbol}",                               colors["orange"], bold=True)
-    put(r + 1, 8, "  Company Executives",                       colors["header"], bold=True)
+    put(r + 1, 8, "  Company Executives",                       colors["orange"], bold=True)
     put(r + 2, 0, f"   {len(execs)} executives on record",      colors["dim"])
     put(r + 3, 0, sep,                                           colors["dim"])
 
@@ -117,7 +117,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         age   = str(ex.get("age") or "")
         comp  = _fmt_comp(ex.get("totalPay") or ex.get("compensation"))
 
-        put(row, C_NAME,  f"{name:<27}", colors["header"])
+        put(row, C_NAME,  f"{name:<27}", colors["orange"])
         put(row, C_TITLE, f"{title:<27}", colors["orange"])
         put(row, C_AGE,   f"{age:<5}",   colors["dim"])
         put(row, C_COMP,  comp,           colors["positive"] if comp != "N/A" else colors["dim"])

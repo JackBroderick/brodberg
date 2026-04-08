@@ -49,8 +49,8 @@ from commands import cmd_help
 from commands import cmd_changelog
 from commands import cmd_des
 from commands import cmd_error
-from commands import cmd_ship
 from commands import cmd_fa
+from commands import cmd_ship
 from commands import cmd_rates
 from commands import cmd_comd
 from commands import cmd_fx
@@ -64,6 +64,7 @@ from commands import cmd_own
 from commands import cmd_sent
 from commands import cmd_uo
 from commands import cmd_earn
+from commands import cmd_omon
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -197,6 +198,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_uo.fetch,
         "render":      cmd_uo.render,
         "on_keypress": cmd_uo.on_keypress,
+    },
+    # ── Options Chain ─────────────────────────────────────────────────────
+    {
+        "prefix":      "OMON",
+        "exact":       False,
+        "fetch":       cmd_omon.fetch,
+        "render":      cmd_omon.render,
+        "on_keypress": cmd_omon.on_keypress,
     },
     # ── Earnings Calendar ─────────────────────────────────────────────────
     {

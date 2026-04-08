@@ -101,7 +101,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     r = 4
     put(r,     0, sep,                                         colors["dim"])
     put(r + 1, 0, f"   {symbol}",                             colors["orange"], bold=True)
-    put(r + 1, 8, "  Dividend History",                       colors["header"], bold=True)
+    put(r + 1, 8, "  Dividend History",                       colors["orange"], bold=True)
     put(r + 2, 0, f"   {len(records)} payments  |  {ccy}",   colors["dim"])
     put(r + 3, 0, sep,                                         colors["dim"])
 
@@ -134,7 +134,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         except (TypeError, ValueError):
             amt = "N/A"
 
-        put(row, C_DATE,   f"{date:<13}", colors["header"])
+        put(row, C_DATE,   f"{date:<13}", colors["orange"])
         put(row, C_EX,     f"{ex:<13}",   colors["dim"])
         put(row, C_PAY,    f"{pay:<13}",  colors["dim"])
         put(row, C_AMOUNT, f"{amt:<11}",  colors["positive"])

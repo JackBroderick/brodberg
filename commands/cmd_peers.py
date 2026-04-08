@@ -75,7 +75,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     r = 4
     put(r,     0, sep,                                    colors["dim"])
     put(r + 1, 0, f"   {symbol}",                        colors["orange"], bold=True)
-    put(r + 1, 8, "  Peer Companies",                    colors["header"], bold=True)
+    put(r + 1, 8, "  Peer Companies",                    colors["orange"], bold=True)
     put(r + 2, 0, f"   {len(peers)} peers identified",   colors["dim"])
     put(r + 3, 0, sep,                                    colors["dim"])
 
@@ -91,7 +91,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     col_idx = 0
 
     for i, peer in enumerate(peers):
-        color = colors["orange"] if peer == symbol else colors["header"]
+        color = colors["orange"] if peer == symbol else colors["orange"]
         put(row, COL_X[col_idx], f"{peer:<{COL_W - 1}}", color)
         col_idx += 1
         if col_idx >= COLS:

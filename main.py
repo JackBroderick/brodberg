@@ -38,6 +38,7 @@ This file should stay clean. It only handles:
 
 import curses
 import datetime
+import time
 import sys
 import ctypes
 import os
@@ -121,7 +122,7 @@ def _set_console_icon(ico_path: str) -> None:
 
 def main(stdscr):
     # ── Terminal setup ────────────────────────────────────────────────────
-    curses.curs_set(1)
+    curses.curs_set(0)   # hide hardware cursor — we draw our own below
     curses.noecho()
     stdscr.keypad(True)
     stdscr.nodelay(True)
@@ -151,7 +152,8 @@ def main(stdscr):
     history  = []
     hist_idx = -1
 
-    scroll_offset = 0
+    scroll_offset     = 0
+    last_scroll_time  = time.monotonic()
 
     while running:
         stdscr.clear()
@@ -175,18 +177,16 @@ def main(stdscr):
         draw_focus_indicator(stdscr, height, width,
                              focused_pane, MAX_PANES, input_focused, colors,
                              zoomed=zoomed)
-        draw_footer(stdscr, height, width, command, colors, input_focused)
-
-        # ── Cursor — pinned to end of visible command text ────────────────
-        try:
-            cmd_area   = max(0, width - PROMPT_LEN - 1)
-            cursor_col = PROMPT_LEN + min(len(command), cmd_area)
-            stdscr.move(height - 1, cursor_col)
-        except Exception:
-            pass
+        # Software cursor — blinks every 500 ms, unaffected by loop speed
+        cursor_blink = int(time.monotonic() * 2) % 2 == 0
+        draw_footer(stdscr, height, width, command, colors, input_focused,
+                    cursor_blink=cursor_blink)
 
         stdscr.refresh()
-        scroll_offset += market_data.NEWS_SCROLL_SPEED
+        now_mono = time.monotonic()
+        if now_mono - last_scroll_time >= 0.1:
+            scroll_offset    += market_data.NEWS_SCROLL_SPEED
+            last_scroll_time  = now_mono
 
         # ── Input ─────────────────────────────────────────────────────────
         key = stdscr.getch()

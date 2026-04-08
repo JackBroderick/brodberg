@@ -407,7 +407,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     # Ticker + name
     _put(stdscr, r, 2,  ticker.upper(),           colors["orange"], bold=True)
     _put(stdscr, r, 2 + len(ticker) + 2,
-         f"{data['name']}",                        colors["header"],  bold=True)
+         f"{data['name']}",                        colors["orange"],  bold=True)
     r += 1
 
     # Exchange / currency / frequency / source
