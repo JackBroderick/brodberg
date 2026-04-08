@@ -1050,9 +1050,42 @@ async def proxy_options(symbol: str):
     cached = _cache_get(key)
     if cached is not None:
         return cached
-    r = await _http_client.get(f"{FH_BASE}/stock/option-chain",
-                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
-    data = r.json()
+
+    def _fetch():
+        import yfinance as yf
+        tk   = yf.Ticker(symbol.upper())
+        exps = tk.options        # tuple of expiry date strings
+        if not exps:
+            return {"data": []}
+
+        def _df_to_list(df):
+            rows = []
+            for _, row in df.iterrows():
+                rows.append({
+                    "strike":            float(row.get("strike") or 0),
+                    "bid":               float(row.get("bid")    or 0),
+                    "ask":               float(row.get("ask")    or 0),
+                    "lastPrice":         float(row.get("lastPrice") or 0),
+                    "volume":            int(row.get("volume")       or 0),
+                    "openInterest":      int(row.get("openInterest") or 0),
+                    "impliedVolatility": float(row.get("impliedVolatility") or 0),
+                    "inTheMoney":        bool(row.get("inTheMoney", False)),
+                })
+            return rows
+
+        result = []
+        for exp in exps:
+            chain = tk.option_chain(exp)
+            result.append({
+                "expirationDate": exp,
+                "options": {
+                    "CALL": _df_to_list(chain.calls),
+                    "PUT":  _df_to_list(chain.puts),
+                },
+            })
+        return {"data": result}
+
+    data = await asyncio.to_thread(_fetch)
     _cache_set(key, data, _TTL_OPTIONS)
     return data
 
