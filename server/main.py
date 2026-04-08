@@ -1044,9 +1044,40 @@ async def proxy_sentiment(symbol: str):
     return data
 
 
-@app.get("/api/options/{symbol}")
-async def proxy_options(symbol: str):
-    key = f"options:{symbol.upper()}"
+def _yf_df_to_list(df) -> list:
+    """Convert a yfinance options DataFrame to a list of dicts, handling NaN safely."""
+    import math
+    def _sf(v):  # safe float
+        try:
+            f = float(v)
+            return 0.0 if (math.isnan(f) or math.isinf(f)) else f
+        except Exception:
+            return 0.0
+    def _si(v):  # safe int
+        try:
+            f = float(v)
+            return 0 if (math.isnan(f) or math.isinf(f)) else int(f)
+        except Exception:
+            return 0
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({
+            "strike":            _sf(row.get("strike")),
+            "bid":               _sf(row.get("bid")),
+            "ask":               _sf(row.get("ask")),
+            "lastPrice":         _sf(row.get("lastPrice")),
+            "volume":            _si(row.get("volume")),
+            "openInterest":      _si(row.get("openInterest")),
+            "impliedVolatility": _sf(row.get("impliedVolatility")),
+            "inTheMoney":        bool(row.get("inTheMoney", False)),
+        })
+    return rows
+
+
+@app.get("/api/options/{symbol}/dates")
+async def proxy_option_dates(symbol: str):
+    """Return the list of available expiry dates for a symbol (fast — no chain data)."""
+    key = f"options-dates:{symbol.upper()}"
     cached = _cache_get(key)
     if cached is not None:
         return cached
@@ -1054,36 +1085,30 @@ async def proxy_options(symbol: str):
     def _fetch():
         import yfinance as yf
         tk   = yf.Ticker(symbol.upper())
-        exps = tk.options        # tuple of expiry date strings
-        if not exps:
-            return {"data": []}
+        exps = tk.options
+        return {"ticker": symbol.upper(), "dates": list(exps) if exps else []}
 
-        def _df_to_list(df):
-            rows = []
-            for _, row in df.iterrows():
-                rows.append({
-                    "strike":            float(row.get("strike") or 0),
-                    "bid":               float(row.get("bid")    or 0),
-                    "ask":               float(row.get("ask")    or 0),
-                    "lastPrice":         float(row.get("lastPrice") or 0),
-                    "volume":            int(row.get("volume")       or 0),
-                    "openInterest":      int(row.get("openInterest") or 0),
-                    "impliedVolatility": float(row.get("impliedVolatility") or 0),
-                    "inTheMoney":        bool(row.get("inTheMoney", False)),
-                })
-            return rows
+    data = await asyncio.to_thread(_fetch)
+    _cache_set(key, data, _TTL_OPTIONS)
+    return data
 
-        result = []
-        for exp in exps:
-            chain = tk.option_chain(exp)
-            result.append({
-                "expirationDate": exp,
-                "options": {
-                    "CALL": _df_to_list(chain.calls),
-                    "PUT":  _df_to_list(chain.puts),
-                },
-            })
-        return {"data": result}
+
+@app.get("/api/options/{symbol}/chain/{expiry}")
+async def proxy_option_chain(symbol: str, expiry: str):
+    """Return calls + puts for a single expiry date."""
+    key = f"options-chain:{symbol.upper()}:{expiry}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    def _fetch():
+        import yfinance as yf
+        tk    = yf.Ticker(symbol.upper())
+        chain = tk.option_chain(expiry)
+        return {
+            "calls": _yf_df_to_list(chain.calls),
+            "puts":  _yf_df_to_list(chain.puts),
+        }
 
     data = await asyncio.to_thread(_fetch)
     _cache_set(key, data, _TTL_OPTIONS)

@@ -6,8 +6,18 @@ Implements the  OMON <TICKER>  command — Options Chain Monitor.
   OMON AAPL     <- full options chain for AAPL
 
 Navigation (PANE mode):
-  ← / →   cycle expiration dates
+  ← / →   cycle expiration dates (fetches each chain lazily on first visit)
   ↑ / ↓   scroll through strike rows
+
+Cache structure:
+  {
+    "ticker":  str,
+    "dates":   [str, ...],       # all expiry dates — fetched once on Enter
+    "chains":  {date: {...}},    # lazily populated per expiry as user navigates
+    "exp_idx": int,
+    "scroll":  int,
+    "error":   str | None,
+  }
 """
 
 import curses
@@ -42,7 +52,6 @@ def _fmt_price(v) -> str:
 def _fmt_iv(v) -> str:
     try:
         f = float(v)
-        # Finnhub returns IV as a decimal (0.25 = 25%) — scale if < 5
         pct = f * 100 if f < 5 else f
         return f"{pct:.1f}%"
     except Exception:
@@ -61,8 +70,16 @@ def _fmt_vol(v) -> str:
         return "--"
 
 
+def _fetch_chain(ticker: str, expiry: str) -> dict | None:
+    """Fetch a single expiry chain from the server. Returns None on failure."""
+    try:
+        return market_data.server_get(f"/api/options/{ticker}/chain/{expiry}")
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
-# fetch — called once on Enter
+# fetch — called once on Enter; gets dates + first chain only
 # ---------------------------------------------------------------------------
 
 def fetch(parts: list) -> dict:
@@ -70,66 +87,70 @@ def fetch(parts: list) -> dict:
     if not ticker:
         return {
             "error": "Usage: OMON <TICKER>   e.g. OMON AAPL",
-            "ticker": None, "expiries": [], "exp_idx": 0, "scroll": 0,
+            "ticker": None, "dates": [], "chains": {}, "exp_idx": 0, "scroll": 0,
         }
 
     try:
-        raw = market_data.server_get(f"/api/options/{ticker}")
+        raw   = market_data.server_get(f"/api/options/{ticker}/dates")
+        dates = raw.get("dates", []) if isinstance(raw, dict) else []
 
-        if not isinstance(raw, dict):
+        if not dates:
             return {
-                "error": f"Unexpected response for {ticker}",
-                "ticker": ticker, "expiries": [], "exp_idx": 0, "scroll": 0,
+                "error": f"No options data found for {ticker}.",
+                "ticker": ticker, "dates": [], "chains": {}, "exp_idx": 0, "scroll": 0,
             }
 
-        data_list = raw.get("data", [])
-        if not data_list:
-            return {
-                "error": f"No options data found for {ticker}. Finnhub may not cover this symbol.",
-                "ticker": ticker, "expiries": [], "exp_idx": 0, "scroll": 0,
-            }
-
-        expiries = []
-        for entry in data_list:
-            exp_date = entry.get("expirationDate", "")
-            options  = entry.get("options", {})
-            calls    = options.get("CALL", [])
-            puts     = options.get("PUT", [])
-            if exp_date:
-                expiries.append({"date": exp_date, "calls": calls, "puts": puts})
-
-        expiries.sort(key=lambda x: x["date"])
+        # Pre-fetch the first expiry so the screen is populated immediately
+        chains = {}
+        first  = _fetch_chain(ticker, dates[0])
+        if first:
+            chains[dates[0]] = first
 
         return {
-            "error":    None,
-            "ticker":   ticker,
-            "expiries": expiries,
-            "exp_idx":  0,
-            "scroll":   0,
+            "error":   None,
+            "ticker":  ticker,
+            "dates":   dates,
+            "chains":  chains,
+            "exp_idx": 0,
+            "scroll":  0,
         }
 
     except Exception as e:
         return {
             "error": str(e), "ticker": ticker,
-            "expiries": [], "exp_idx": 0, "scroll": 0,
+            "dates": [], "chains": {}, "exp_idx": 0, "scroll": 0,
         }
 
 
 # ---------------------------------------------------------------------------
-# on_keypress — ← → change expiry, ↑ ↓ scroll strikes
+# on_keypress — ← → change expiry (lazy fetch), ↑ ↓ scroll strikes
 # ---------------------------------------------------------------------------
 
 def on_keypress(key: int, cache: dict) -> dict:
-    expiries = cache.get("expiries", [])
-    n        = len(expiries)
-    exp_idx  = cache.get("exp_idx", 0)
-    scroll   = cache.get("scroll", 0)
+    dates   = cache.get("dates", [])
+    chains  = cache.get("chains", {})
+    ticker  = cache.get("ticker", "")
+    n       = len(dates)
+    exp_idx = cache.get("exp_idx", 0)
+    scroll  = cache.get("scroll", 0)
 
     if key == curses.KEY_LEFT:
-        return {**cache, "exp_idx": max(0, exp_idx - 1), "scroll": 0}
+        new_idx = max(0, exp_idx - 1)
+        expiry  = dates[new_idx] if dates else None
+        if expiry and expiry not in chains:
+            chain = _fetch_chain(ticker, expiry)
+            if chain:
+                chains = {**chains, expiry: chain}
+        return {**cache, "chains": chains, "exp_idx": new_idx, "scroll": 0}
 
     if key == curses.KEY_RIGHT:
-        return {**cache, "exp_idx": min(n - 1, exp_idx + 1) if n else 0, "scroll": 0}
+        new_idx = min(n - 1, exp_idx + 1) if n else 0
+        expiry  = dates[new_idx] if dates else None
+        if expiry and expiry not in chains:
+            chain = _fetch_chain(ticker, expiry)
+            if chain:
+                chains = {**chains, expiry: chain}
+        return {**cache, "chains": chains, "exp_idx": new_idx, "scroll": 0}
 
     if key == curses.KEY_UP:
         return {**cache, "scroll": max(0, scroll - 1)}
@@ -154,20 +175,19 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         _put(stdscr, r, 0, f"  Error: {error}", colors["negative"])
         return
 
-    ticker   = cache.get("ticker", "")
-    expiries = cache.get("expiries", [])
-    exp_idx  = cache.get("exp_idx", 0)
-    scroll   = cache.get("scroll", 0)
+    ticker  = cache.get("ticker", "")
+    dates   = cache.get("dates", [])
+    chains  = cache.get("chains", {})
+    exp_idx = cache.get("exp_idx", 0)
+    scroll  = cache.get("scroll", 0)
 
-    if not expiries:
+    if not dates:
         _put(stdscr, r, 2, "  Loading...", colors["dim"])
         return
 
-    exp_idx = min(exp_idx, len(expiries) - 1)
-    exp     = expiries[exp_idx]
-    date    = exp["date"]
-    calls   = exp.get("calls", [])
-    puts    = exp.get("puts", [])
+    exp_idx = min(exp_idx, len(dates) - 1)
+    date    = dates[exp_idx]
+    chain   = chains.get(date)
 
     # ── Header ────────────────────────────────────────────────────────────
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
@@ -175,18 +195,24 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     _put(stdscr, r, 10 + len(ticker), f"  Options Chain  —  {date}", colors["dim"])
     r += 1
 
-    # Expiry navigation line
     nav = []
     if exp_idx > 0:
-        nav.append(f"←  {expiries[exp_idx - 1]['date']}")
-    nav.append(f"[ {exp_idx + 1} of {len(expiries)} ]")
-    if exp_idx < len(expiries) - 1:
-        nav.append(f"{expiries[exp_idx + 1]['date']}  →")
+        nav.append(f"←  {dates[exp_idx - 1]}")
+    nav.append(f"[ {exp_idx + 1} of {len(dates)} ]")
+    if exp_idx < len(dates) - 1:
+        nav.append(f"{dates[exp_idx + 1]}  →")
     _put(stdscr, r, 2, "   ".join(nav), colors["dim"])
     hint = "← → expiry   ↑ ↓ scroll"
     _put(stdscr, r, max(2, width - len(hint) - 2), hint, colors["dim"])
     r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+
+    if chain is None:
+        _put(stdscr, r, 2, "  Fetching chain...", colors["dim"])
+        return
+
+    calls = chain.get("calls", [])
+    puts  = chain.get("puts",  [])
 
     # ── Build strike index ────────────────────────────────────────────────
     call_map = {c.get("strike", 0): c for c in calls}
@@ -197,25 +223,22 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         _put(stdscr, r, 2, "No contracts found for this expiry.", colors["dim"])
         return
 
-    # Clamp scroll
     max_scroll = max(0, len(strikes) - _VISIBLE_ROWS)
-    scroll = min(scroll, max_scroll)
+    scroll     = min(scroll, max_scroll)
 
     # ── Column layout — symmetric around the strike column ───────────────
     #
     #   CALLS (green/dim)            STRIKE    PUTS (red/dim)
     #   IV    Bid   Ask   Vol   OI | STRIKE | OI   Vol   Ask   Bid   IV
     #
-    strike_col = width // 2 - 4   # centre of 9-char strike field
+    strike_col = width // 2 - 4
 
-    # CALLS columns — right-aligned approaching strike
     C_OI_L  = strike_col - 7
     C_VOL_L = C_OI_L  - 7
     C_ASK_L = C_VOL_L - 8
     C_BID_L = C_ASK_L - 8
     C_IV_L  = C_BID_L - 7
 
-    # PUTS columns — left-aligned from strike
     C_STR   = strike_col
     C_OI_R  = strike_col + 10
     C_VOL_R = C_OI_R  + 7
@@ -223,7 +246,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     C_BID_R = C_ASK_R + 8
     C_IV_R  = C_BID_R + 8
 
-    # Side labels row
+    # Side labels
     if C_IV_L > 2:
         _put(stdscr, r, C_IV_L, "─── CALLS ───", colors["positive"], bold=True)
     _put(stdscr, r, C_OI_R, "─── PUTS ───", colors["negative"], bold=True)
@@ -231,59 +254,42 @@ def render(stdscr, cache: dict, colors: dict) -> None:
 
     # Column headers
     if C_IV_L > 2:
-        _put(stdscr, r, C_IV_L,  f"{'IV':>6}",   colors["dim"], bold=True)
-    _put(stdscr, r, C_BID_L, f"{'Bid':>7}",   colors["dim"], bold=True)
-    _put(stdscr, r, C_ASK_L, f"{'Ask':>7}",   colors["dim"], bold=True)
-    _put(stdscr, r, C_VOL_L, f"{'Vol':>7}",   colors["dim"], bold=True)
-    _put(stdscr, r, C_OI_L,  f"{'OI':>6}",    colors["dim"], bold=True)
+        _put(stdscr, r, C_IV_L,  f"{'IV':>6}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_BID_L, f"{'Bid':>7}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_ASK_L, f"{'Ask':>7}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_VOL_L, f"{'Vol':>7}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_OI_L,  f"{'OI':>6}",     colors["dim"], bold=True)
     _put(stdscr, r, C_STR,   f"{'STRIKE':^9}", colors["orange"], bold=True)
-    _put(stdscr, r, C_OI_R,  f"{'OI':<6}",    colors["dim"], bold=True)
-    _put(stdscr, r, C_VOL_R, f"{'Vol':<7}",   colors["dim"], bold=True)
-    _put(stdscr, r, C_ASK_R, f"{'Ask':<7}",   colors["dim"], bold=True)
-    _put(stdscr, r, C_BID_R, f"{'Bid':<7}",   colors["dim"], bold=True)
+    _put(stdscr, r, C_OI_R,  f"{'OI':<6}",     colors["dim"], bold=True)
+    _put(stdscr, r, C_VOL_R, f"{'Vol':<7}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_ASK_R, f"{'Ask':<7}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_BID_R, f"{'Bid':<7}",    colors["dim"], bold=True)
     if C_IV_R < width - 6:
         _put(stdscr, r, C_IV_R, f"{'IV':<6}",  colors["dim"], bold=True)
     r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
 
     # ── Strike rows ───────────────────────────────────────────────────────
-    visible = strikes[scroll: scroll + _VISIBLE_ROWS]
-
-    for strike in visible:
+    for strike in strikes[scroll: scroll + _VISIBLE_ROWS]:
         c = call_map.get(strike, {})
         p = put_map.get(strike, {})
 
-        c_itm      = c.get("inTheMoney", False)
-        p_itm      = p.get("inTheMoney", False)
-        call_color = colors["positive"] if c_itm else colors["dim"]
-        put_color  = colors["negative"] if p_itm else colors["dim"]
-
-        c_iv  = _fmt_iv(c.get("impliedVolatility"))
-        c_bid = _fmt_price(c.get("bid"))
-        c_ask = _fmt_price(c.get("ask"))
-        c_vol = _fmt_vol(c.get("volume"))
-        c_oi  = _fmt_vol(c.get("openInterest"))
-
-        p_iv  = _fmt_iv(p.get("impliedVolatility"))
-        p_bid = _fmt_price(p.get("bid"))
-        p_ask = _fmt_price(p.get("ask"))
-        p_vol = _fmt_vol(p.get("volume"))
-        p_oi  = _fmt_vol(p.get("openInterest"))
+        call_color = colors["positive"] if c.get("inTheMoney") else colors["dim"]
+        put_color  = colors["negative"] if p.get("inTheMoney") else colors["dim"]
 
         if C_IV_L > 2:
-            _put(stdscr, r, C_IV_L,  f"{c_iv:>6}",   call_color)
-        _put(stdscr, r, C_BID_L, f"{c_bid:>7}",   call_color)
-        _put(stdscr, r, C_ASK_L, f"{c_ask:>7}",   call_color)
-        _put(stdscr, r, C_VOL_L, f"{c_vol:>7}",   call_color)
-        _put(stdscr, r, C_OI_L,  f"{c_oi:>6}",    call_color)
+            _put(stdscr, r, C_IV_L,  f"{_fmt_iv(c.get('impliedVolatility')):>6}",  call_color)
+        _put(stdscr, r, C_BID_L, f"{_fmt_price(c.get('bid')):>7}",   call_color)
+        _put(stdscr, r, C_ASK_L, f"{_fmt_price(c.get('ask')):>7}",   call_color)
+        _put(stdscr, r, C_VOL_L, f"{_fmt_vol(c.get('volume')):>7}",  call_color)
+        _put(stdscr, r, C_OI_L,  f"{_fmt_vol(c.get('openInterest')):>6}", call_color)
         _put(stdscr, r, C_STR,   f"{strike:^9.2f}", colors["orange"], bold=True)
-        _put(stdscr, r, C_OI_R,  f"{p_oi:<6}",    put_color)
-        _put(stdscr, r, C_VOL_R, f"{p_vol:<7}",   put_color)
-        _put(stdscr, r, C_ASK_R, f"{p_ask:<7}",   put_color)
-        _put(stdscr, r, C_BID_R, f"{p_bid:<7}",   put_color)
+        _put(stdscr, r, C_OI_R,  f"{_fmt_vol(p.get('openInterest')):<6}", put_color)
+        _put(stdscr, r, C_VOL_R, f"{_fmt_vol(p.get('volume')):<7}",  put_color)
+        _put(stdscr, r, C_ASK_R, f"{_fmt_price(p.get('ask')):<7}",   put_color)
+        _put(stdscr, r, C_BID_R, f"{_fmt_price(p.get('bid')):<7}",   put_color)
         if C_IV_R < width - 6:
-            _put(stdscr, r, C_IV_R, f"{p_iv:<6}",  put_color)
-
+            _put(stdscr, r, C_IV_R, f"{_fmt_iv(p.get('impliedVolatility')):<6}", put_color)
         r += 1
 
     # Scroll indicator
