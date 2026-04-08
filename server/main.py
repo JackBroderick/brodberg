@@ -343,7 +343,10 @@ async def _scrape_unusual_options() -> dict:
         today_s     = _date.today().strftime("%Y-%m-%d")
         yesterday_s = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-        qs = (
+        _TARGET  = 500   # rows we want total
+        _PG_SIZE = 100   # rows per API request
+
+        base_qs = (
             "fields=symbol,baseSymbol,baseLastPrice,expirationDate,"
             "daysToExpiration,strikePrice,moneyness,bidPrice,lastPrice,"
             "askPrice,volume,openInterest,volumeOpenInterestRatio,"
@@ -356,12 +359,11 @@ async def _scrape_unusual_options() -> dict:
             "&between(volume,500,)="
             "&between(openInterest,100,)="
             "&in(exchange,(AMEX,NYSE,NASDAQ,INDEX-CBOE))="
-            "&limit=100"
+            f"&limit={_PG_SIZE}"
             "&meta=field.shortName,field.type,field.description"
             "&hasOptions=true"
             "&raw=1"
         )
-        api_url  = f"https://www.barchart.com/proxies/core-api/v1/options/get?{qs}"
         api_hdrs = {
             **hdrs,
             "Referer":      base_url,
@@ -369,47 +371,55 @@ async def _scrape_unusual_options() -> dict:
             "Accept":       "application/json, text/plain, */*",
         }
 
-        r2 = await _http_client.get(
-            api_url,
-            headers=api_hdrs,
-            cookies=cookies,
-            follow_redirects=True,
-            timeout=30.0,
-        )
+        import datetime as _dt
 
-        ct   = r2.headers.get("content-type", "")
-        body = r2.text
+        all_raw: list = []
+        page          = 1
+        diag_step2    = {}
 
-        diag_step2 = {
-            "status":        r2.status_code,
-            "content_type":  ct,
-            "body_len":      len(body),
-            "body_preview":  body[:500],
-        }
+        while len(all_raw) < _TARGET:
+            page_qs  = f"{base_qs}&page={page}"
+            api_url  = (f"https://www.barchart.com/proxies/core-api/v1"
+                        f"/options/get?{page_qs}")
+            r2       = await _http_client.get(api_url, headers=api_hdrs,
+                                              cookies=cookies,
+                                              follow_redirects=True, timeout=30.0)
+            ct   = r2.headers.get("content-type", "")
+            body = r2.text
+            diag_step2 = {"status": r2.status_code, "content_type": ct,
+                          "page": page, "body_preview": body[:300]}
 
-        if r2.status_code != 200:
-            msg = f"API returned {r2.status_code}. step2={diag_step2}"
-            print(f"[UO] {msg}")
-            return {"ok": False, "rows": 0, "error": "bad_status", "detail": msg}
+            if r2.status_code != 200:
+                msg = f"API page {page} returned {r2.status_code}. {diag_step2}"
+                print(f"[UO] {msg}")
+                return {"ok": False, "rows": 0, "error": "bad_status", "detail": msg}
 
-        try:
-            payload = r2.json()
-        except Exception:
-            msg = f"Response not JSON. step2={diag_step2}"
-            print(f"[UO] {msg}")
-            return {"ok": False, "rows": 0, "error": "not_json", "detail": msg}
+            try:
+                payload = r2.json()
+            except Exception:
+                msg = f"Page {page} not JSON. {diag_step2}"
+                print(f"[UO] {msg}")
+                return {"ok": False, "rows": 0, "error": "not_json", "detail": msg}
 
-        # Barchart wraps records in payload["data"][n]["raw"]
-        raw_records = payload.get("data", [])
-        if not raw_records:
-            msg = f"JSON ok but data[] empty. keys={list(payload.keys())} step2={diag_step2}"
+            page_records = payload.get("data", [])
+            if not page_records:
+                break   # no more data
+
+            all_raw.extend(page_records)
+
+            # Stop early if the API returned fewer rows than requested (last page)
+            if len(page_records) < _PG_SIZE:
+                break
+
+            page += 1
+
+        if not all_raw:
+            msg = f"All pages empty. keys={list(payload.keys())} {diag_step2}"
             print(f"[UO] {msg}")
             return {"ok": False, "rows": 0, "error": "empty_data", "detail": msg}
 
-        import datetime as _dt
-
         rows = []
-        for rec in raw_records:
+        for rec in all_raw[:_TARGET]:
             r = rec.get("raw", rec)   # unwrap {"raw": {...}} if present
 
             # Parse OCC symbol "AAPL|20260515|111.00C" as fallback source
@@ -430,10 +440,10 @@ async def _scrape_unusual_options() -> dict:
 
             # Format trade time: unix ts → HH:MM
             try:
-                ts      = int(r.get("tradeTime", 0) or 0)
-                time_s  = _dt.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
+                ts     = int(r.get("tradeTime", 0) or 0)
+                time_s = _dt.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
             except Exception:
-                time_s  = str(r.get("tradeTime", ""))
+                time_s = str(r.get("tradeTime", ""))
 
             rows.append({
                 "Symbol":          str(r.get("baseSymbol",                  occ_tick)),
