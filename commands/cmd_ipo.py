@@ -229,7 +229,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         _put(stdscr, 4, 0, "  Loading...", colors["dim"])
         return
 
-    sep = f"  {'─' * min(74, width - 3)}"
+    sep = f"  {'─' * (width - 3)}"
     r   = 4
 
     # ── Header ───────────────────────────────────────────────────────────
@@ -297,7 +297,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
             # Fill entire row with highlight background
             try:
                 stdscr.attron(colors["highlight"] | curses.A_BOLD)
-                stdscr.addstr(r, 0, " " * min(width - 1, 92))
+                stdscr.addstr(r, 0, " " * (width - 1))
                 stdscr.attroff(colors["highlight"] | curses.A_BOLD)
             except Exception:
                 pass

@@ -98,6 +98,13 @@ _TTL_SENTIMENT      = 300
 
 _unusual_options: dict = {"data": [], "as_of": None}
 
+# ---------------------------------------------------------------------------
+# Earnings Calendar store
+# Populated by _earn_scheduler(); persisted to/from DB across restarts.
+# ---------------------------------------------------------------------------
+
+_earnings: dict = {"data": [], "as_of": None}
+
 
 def _cache_get(key: str):
     with _cache_lock:
@@ -249,6 +256,14 @@ def _init_db() -> None:
         # Unusual options — same schema for both DBs (all TEXT)
         _execute(conn, """
             CREATE TABLE IF NOT EXISTS unusual_options (
+                trade_date TEXT PRIMARY KEY,
+                data       TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            )
+        """)
+        # Earnings calendar
+        _execute(conn, """
+            CREATE TABLE IF NOT EXISTS earnings_calendar (
                 trade_date TEXT PRIMARY KEY,
                 data       TEXT NOT NULL,
                 fetched_at TEXT NOT NULL
@@ -509,6 +524,181 @@ async def _uo_scheduler() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Earnings Calendar — DB helpers, scraper, and scheduler
+# ---------------------------------------------------------------------------
+
+def _earn_save_db(trade_date: str, rows: list) -> None:
+    try:
+        with _db_conn() as conn:
+            _execute(conn,
+                "INSERT INTO earnings_calendar (trade_date, data, fetched_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT (trade_date) DO UPDATE SET "
+                "data = excluded.data, fetched_at = excluded.fetched_at",
+                (trade_date, json.dumps(rows),
+                 datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+    except Exception as e:
+        print(f"[EARN] db save error: {e}")
+
+
+def _earn_load_db() -> None:
+    try:
+        with _db_conn() as conn:
+            cur = _execute(conn,
+                "SELECT trade_date, data FROM earnings_calendar "
+                "ORDER BY trade_date DESC LIMIT 1")
+            row = cur.fetchone()
+        if row:
+            _earnings["data"]  = json.loads(row["data"])
+            _earnings["as_of"] = row["trade_date"]
+            print(f"[EARN] loaded {len(_earnings['data'])} rows "
+                  f"for {_earnings['as_of']} from DB")
+    except Exception as e:
+        print(f"[EARN] db load error: {e}")
+
+
+async def _scrape_earnings() -> dict:
+    """Scrape Barchart upcoming earnings (next trading day) via their internal API."""
+    from urllib.parse import unquote
+    from datetime import date as _date
+    import datetime as _dt
+
+    base_url = "https://www.barchart.com/options/upcoming-earnings"
+    today    = _date.today().strftime("%Y-%m-%d")
+
+    hdrs = {
+        "User-Agent":      ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"),
+        "Accept":          ("text/html,application/xhtml+xml,application/xml;"
+                            "q=0.9,image/webp,*/*;q=0.8"),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection":      "keep-alive",
+    }
+
+    try:
+        # Step 1 — land on the page to collect XSRF-TOKEN
+        r1   = await _http_client.get(base_url, headers=hdrs,
+                                      follow_redirects=True, timeout=30.0)
+        xsrf = unquote(r1.cookies.get("XSRF-TOKEN", ""))
+        cookies = dict(r1.cookies)
+
+        if not xsrf:
+            msg = f"XSRF-TOKEN not found. cookies={list(cookies.keys())}"
+            print(f"[EARN] {msg}")
+            return {"ok": False, "rows": 0, "error": "no_xsrf", "detail": msg}
+
+        # Step 2 — call the internal API (exact params from browser Network tab)
+        qs = (
+            "lists=stocks.optionable.upcoming_earnings.1d.us"
+            "&fields=symbol,symbolName,nextEarningsDate,timeCode,lastPrice,"
+            "priceChange,percentChange,optionsImpliedVolatilityRank1y,"
+            "nearestImpliedMove,nearestImpliedMovePercent,optionsTotalVolume,tradeTime"
+            "&orderBy=nextEarningsDate&orderDir=asc"
+            "&page=1&limit=200"
+            "&hasOptions=true"
+            "&raw=1"
+        )
+        api_url  = f"https://www.barchart.com/proxies/core-api/v1/quotes/get?{qs}"
+        api_hdrs = {
+            **hdrs,
+            "Referer":      base_url,
+            "X-XSRF-Token": xsrf,
+            "Accept":       "application/json, text/plain, */*",
+        }
+
+        r2   = await _http_client.get(api_url, headers=api_hdrs, cookies=cookies,
+                                      follow_redirects=True, timeout=30.0)
+        body = r2.text
+        diag = {"status": r2.status_code,
+                "content_type": r2.headers.get("content-type", ""),
+                "body_preview": body[:400]}
+
+        if r2.status_code != 200:
+            msg = f"API returned {r2.status_code}. {diag}"
+            print(f"[EARN] {msg}")
+            return {"ok": False, "rows": 0, "error": "bad_status", "detail": msg}
+
+        try:
+            payload = r2.json()
+        except Exception:
+            msg = f"Response not JSON. {diag}"
+            print(f"[EARN] {msg}")
+            return {"ok": False, "rows": 0, "error": "not_json", "detail": msg}
+
+        raw_records = payload.get("data", [])
+        if not raw_records:
+            msg = f"data[] empty. keys={list(payload.keys())} {diag}"
+            print(f"[EARN] {msg}")
+            return {"ok": False, "rows": 0, "error": "empty_data", "detail": msg}
+
+        rows = []
+        for rec in raw_records:
+            r = rec.get("raw", rec)
+
+            # Format trade time: unix ts → HH:MM
+            try:
+                ts     = int(r.get("tradeTime", 0) or 0)
+                time_s = _dt.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
+            except Exception:
+                time_s = str(r.get("tradeTime", ""))
+
+            rows.append({
+                "Symbol":       str(r.get("symbol",                          "")),
+                "Name":         str(r.get("symbolName",                      "")),
+                "Date":         str(r.get("nextEarningsDate",                "")),
+                "Time":         str(r.get("timeCode",                        "")),
+                "Price":        str(r.get("lastPrice",                       "")),
+                "Change %":     str(r.get("percentChange",                   "")),
+                "IV Rank":      str(r.get("optionsImpliedVolatilityRank1y",  "")),
+                "Impl Move":    str(r.get("nearestImpliedMove",              "")),
+                "Impl Move %":  str(r.get("nearestImpliedMovePercent",       "")),
+                "Opt Volume":   str(r.get("optionsTotalVolume",              "")),
+                "Last Trade":   time_s,
+            })
+
+        _earnings["data"]  = rows
+        _earnings["as_of"] = today
+        _earn_save_db(today, rows)
+        print(f"[EARN] scraped {len(rows)} rows for {today}")
+        return {"ok": True, "rows": len(rows), "error": None,
+                "detail": f"scraped {len(rows)} rows for {today}"}
+
+    except Exception as e:
+        msg = str(e)
+        print(f"[EARN] scrape exception: {msg}")
+        return {"ok": False, "rows": 0, "error": "exception", "detail": msg}
+
+
+async def _earn_scheduler() -> None:
+    """Load cached earnings from DB on startup, then scrape daily at 4:05 PM ET."""
+    from zoneinfo import ZoneInfo
+
+    _earn_load_db()
+    last_date: str | None = _earnings.get("as_of")
+
+    if last_date is None:
+        result = await _scrape_earnings()
+        print(f"[EARN] startup scrape: {result}")
+        last_date = _earnings.get("as_of")
+
+    while True:
+        try:
+            et        = datetime.now(ZoneInfo("America/New_York"))
+            today_str = et.strftime("%Y-%m-%d")
+            if (et.weekday() < 5
+                    and (et.hour > 16 or (et.hour == 16 and et.minute >= 5))
+                    and last_date != today_str):
+                await _scrape_earnings()
+                last_date = today_str
+        except Exception as e:
+            print(f"[EARN] scheduler error: {e}")
+        await asyncio.sleep(30)
+
+
+# ---------------------------------------------------------------------------
 # Minimal JWT (HS256)
 # ---------------------------------------------------------------------------
 
@@ -551,6 +741,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_rest_bench_poll())
     asyncio.create_task(_finnhub_ws_bench())
     asyncio.create_task(_uo_scheduler())
+    asyncio.create_task(_earn_scheduler())
     yield
     await _http_client.aclose()
     if _pool:
@@ -860,6 +1051,20 @@ async def live_benchmarks():
 @app.get("/api/unusual-options")
 async def get_unusual_options():
     return _unusual_options
+
+
+@app.get("/api/earnings")
+async def get_earnings():
+    return _earnings
+
+
+@app.get("/api/earnings/refresh")
+async def refresh_earnings():
+    result = await _scrape_earnings()
+    sample = _earnings.get("data", [])[:3]
+    return {**result, "sample": sample,
+            "store": {"as_of": _earnings.get("as_of"),
+                      "row_count": len(_earnings.get("data", []))}}
 
 
 @app.get("/api/unusual-options/refresh")

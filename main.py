@@ -143,7 +143,7 @@ def main(stdscr):
     focused_pane  = 0      # which pane receives commands / keypresses
     input_focused = True   # True  = INPUT mode  (all keys go to command bar)
                            # False = PANE mode   (Z / Tab / arrows navigate)
-    zoomed        = False  # True  = focused pane fills screen, others as tabs
+    zoomed        = True   # True  = focused pane fills screen, others as tabs
 
     # ── Input state ───────────────────────────────────────────────────────
     command  = ""

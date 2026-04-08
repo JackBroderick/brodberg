@@ -63,6 +63,7 @@ from commands import cmd_div
 from commands import cmd_own
 from commands import cmd_sent
 from commands import cmd_uo
+from commands import cmd_earn
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -196,6 +197,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_uo.fetch,
         "render":      cmd_uo.render,
         "on_keypress": cmd_uo.on_keypress,
+    },
+    # ── Earnings Calendar ─────────────────────────────────────────────────
+    {
+        "prefix":      "EARN",
+        "exact":       True,
+        "fetch":       cmd_earn.fetch,
+        "render":      cmd_earn.render,
+        "on_keypress": cmd_earn.on_keypress,
     },
 ]
 

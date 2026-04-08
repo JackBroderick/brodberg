@@ -57,6 +57,11 @@
                        ↑ ↓  navigate   ← →  filter CALL / PUT
                        Enter  expand / collapse contract detail
 
+  EARN               - Next-day earnings calendar (scraped daily at 4:05 PM ET)
+                       ↑ ↓  navigate   ← →  filter BMO / AMC
+                       Enter  expand / collapse detail
+                       Enter  expand / collapse contract detail
+
   N                  - Market news feed (all headlines)
 
   N <Ticker>         - Company-specific news  e.g. N AAPL

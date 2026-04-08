@@ -1,16 +1,16 @@
 """
-commands/cmd_uo.py
-------------------
-Implements the  UO  command — Unusual Options Activity.
+commands/cmd_earn.py
+--------------------
+Implements the  EARN  command — Next-Day Earnings Calendar.
 
 Data is scraped from Barchart by the server once daily at ~4:05 PM ET
-and stored in the database so it survives server restarts.
+(stocks.optionable.upcoming_earnings.1d.us list).
 
-  UO        <- show most recent unusual options table
+  EARN      <- show next trading day's earnings reporters
 
 Navigation (PANE mode):
   ↑ / ↓    move cursor through rows
-  ← / →    filter: ALL → CALL → PUT
+  ← / →    filter: ALL → BMO → AMC
   Enter     expand selected row / collapse
 """
 
@@ -23,11 +23,11 @@ import market_data
 # ---------------------------------------------------------------------------
 
 _VISIBLE_ROWS = 18
-_FILTER_CYCLE = ["ALL", "CALL", "PUT"]
+_FILTER_CYCLE = ["ALL", "BMO", "AMC"]
 
 
 # ---------------------------------------------------------------------------
-# Field access — Barchart CSV headers can vary slightly; try all known names
+# Field helpers
 # ---------------------------------------------------------------------------
 
 def _get(row: dict, *keys) -> str:
@@ -37,39 +37,23 @@ def _get(row: dict, *keys) -> str:
             return str(v).strip()
     return ""
 
-
-def _sym(r):    return _get(r, "Symbol")
-def _name(r):   return _get(r, "Name", "Company", "Description")
-def _type(r):   return _get(r, "Put/Call", "Type", "Option Type").upper()
-def _exp(r):    return _get(r, "Expiration Date", "Exp Date", "Expiration")
-def _strike(r): return _get(r, "Strike", "Strike Price")
-def _vol(r):    return _get(r, "Volume")
-def _oi(r):     return _get(r, "Open Interest")
-def _voloi(r):  return _get(r, "Vol/OI Ratio", "Vol/OI")
-def _iv(r):     return _get(r, "IV", "IV %", "Implied Volatility")
-def _bid(r):       return _get(r, "Bid")
-def _ask(r):       return _get(r, "Ask")
-def _last(r):      return _get(r, "Last Price", "Last")
-def _time(r):      return _get(r, "Time")
-def _base_px(r):   return _get(r, "Base Price")
-def _delta(r):     return _get(r, "Delta")
-def _moneyness(r): return _get(r, "Moneyness")
-def _dte(r):       return _get(r, "DTE")
-
-
-def _type_short(row: dict) -> str:
-    t = _type(row)
-    if "CALL" in t:
-        return "CALL"
-    if "PUT" in t:
-        return "PUT"
-    return t[:4]
+def _sym(r):       return _get(r, "Symbol")
+def _name(r):      return _get(r, "Name")
+def _date(r):      return _get(r, "Date")
+def _time(r):      return _get(r, "Time")        # BMO / AMC
+def _price(r):     return _get(r, "Price")
+def _chg(r):       return _get(r, "Change %")
+def _ivrank(r):    return _get(r, "IV Rank")
+def _implmv(r):    return _get(r, "Impl Move")
+def _implmvp(r):   return _get(r, "Impl Move %")
+def _optvol(r):    return _get(r, "Opt Volume")
+def _lasttrd(r):   return _get(r, "Last Trade")
 
 
 def _filter_rows(rows: list, filt: str) -> list:
     if filt == "ALL":
         return rows
-    return [r for r in rows if _type_short(r) == filt]
+    return [r for r in rows if _time(r).upper() == filt]
 
 
 # ---------------------------------------------------------------------------
@@ -86,13 +70,21 @@ def _put(stdscr, row, col, text, color, bold=False):
         pass
 
 
+def _chg_color(row: dict, colors: dict):
+    try:
+        v = float(_chg(row))
+        return colors.get("positive") if v > 0 else colors.get("negative") if v < 0 else colors["dim"]
+    except Exception:
+        return colors["dim"]
+
+
 # ---------------------------------------------------------------------------
 # fetch — called once on Enter
 # ---------------------------------------------------------------------------
 
 def fetch(parts: list) -> dict:
     try:
-        raw   = market_data.server_get("/api/unusual-options")
+        raw   = market_data.server_get("/api/earnings")
         data  = raw.get("data", []) if isinstance(raw, dict) else []
         as_of = raw.get("as_of")    if isinstance(raw, dict) else None
         return {
@@ -137,8 +129,8 @@ def on_keypress(key: int, cache: dict) -> dict:
         if n == 0:
             return cache
         new_sel = max(0, sel - 1)
-        new_off = min(off, new_sel)
-        return {**cache, "selected": new_sel, "page_offset": new_off, "expanded": False}
+        return {**cache, "selected": new_sel,
+                "page_offset": min(off, new_sel), "expanded": False}
 
     if key == curses.KEY_DOWN:
         if n == 0:
@@ -161,7 +153,7 @@ def on_keypress(key: int, cache: dict) -> dict:
 
 def render(stdscr, cache: dict, colors: dict) -> None:
     _, width = stdscr.getmaxyx()
-    sep      = f"  {'─' * (width - 3)}"   # stretch to full terminal width
+    sep      = f"  {'─' * (width - 3)}"
     r        = 4
 
     error = cache.get("error")
@@ -179,10 +171,10 @@ def render(stdscr, cache: dict, colors: dict) -> None:
 
     # ── Header ────────────────────────────────────────────────────────────
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
-    _put(stdscr, r, 2, "UNUSUAL OPTIONS", colors["orange"], bold=True)
-    _put(stdscr, r, 20, f"as of {as_of}", colors["dim"])          # col 20 → ends at 36
+    _put(stdscr, r, 2, "EARNINGS CALENDAR", colors["orange"], bold=True)
+    _put(stdscr, r, 22, f"as of {as_of}", colors["dim"])
     if all_rows:
-        _put(stdscr, r, 38,
+        _put(stdscr, r, 40,
              f"{len(all_rows)} total  |  {len(rows)} shown", colors["dim"])
     r += 1
 
@@ -206,7 +198,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         return
 
     if not rows:
-        _put(stdscr, r, 2, f"No {filt} contracts in today's data.", colors["dim"])
+        _put(stdscr, r, 2, f"No {filt} reporters in today's data.", colors["dim"])
         return
 
     # ── Expanded detail view ──────────────────────────────────────────────
@@ -214,34 +206,27 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         _render_detail(stdscr, r, rows[sel], colors, sep, width)
         return
 
-    # ── Column layout — fixed core, optional extras as width grows ────────
+    # ── Column layout ─────────────────────────────────────────────────────
     C_SYM   = 2
-    C_TYPE  = 10
-    C_STR   = 16
-    C_EXP   = 24
-    C_VOL   = 36
-    C_OI    = 46
-    C_VOLOI = 56
-    C_IV    = 64
-    # optional columns shown when terminal is wide enough
-    C_STPX  = 74   # stock price  (width ≥ 88)
-    C_DTE   = 84   # days-to-exp  (width ≥ 98)
-    C_DELTA = 92   # delta        (width ≥ 108)
+    C_TIME  = 10   # BMO / AMC
+    C_NAME  = 16   # company name (dynamic width)
+    C_DATE  = max(38, width - 58)
+    C_PRICE = C_DATE  + 12
+    C_CHG   = C_PRICE + 10
+    C_IVRK  = C_CHG   + 10
+    C_IMPL  = C_IVRK  + 10
 
-    _put(stdscr, r, C_SYM,   f"{'SYM':<7}",        colors["dim"], bold=True)
-    _put(stdscr, r, C_TYPE,  f"{'TYPE':<5}",        colors["dim"], bold=True)
-    _put(stdscr, r, C_STR,   f"{'STRIKE':<7}",      colors["dim"], bold=True)
-    _put(stdscr, r, C_EXP,   f"{'EXPIRATION':<11}", colors["dim"], bold=True)
-    _put(stdscr, r, C_VOL,   f"{'VOLUME':<9}",      colors["dim"], bold=True)
-    _put(stdscr, r, C_OI,    f"{'OI':<9}",          colors["dim"], bold=True)
-    _put(stdscr, r, C_VOLOI, f"{'VOL/OI':<7}",      colors["dim"], bold=True)
-    _put(stdscr, r, C_IV,    f"{'IV':<9}",           colors["dim"], bold=True)
-    if width >= 88:
-        _put(stdscr, r, C_STPX,  f"{'STK PX':<9}",  colors["dim"], bold=True)
-    if width >= 98:
-        _put(stdscr, r, C_DTE,   f"{'DTE':<7}",      colors["dim"], bold=True)
-    if width >= 108:
-        _put(stdscr, r, C_DELTA, f"{'DELTA':<8}",    colors["dim"], bold=True)
+    name_w  = C_DATE - C_NAME - 2
+
+    _put(stdscr, r, C_SYM,  f"{'SYM':<7}",              colors["dim"], bold=True)
+    _put(stdscr, r, C_TIME, f"{'TIME':<5}",              colors["dim"], bold=True)
+    _put(stdscr, r, C_NAME, f"{'COMPANY':<{name_w}}",    colors["dim"], bold=True)
+    _put(stdscr, r, C_DATE, f"{'DATE':<11}",             colors["dim"], bold=True)
+    _put(stdscr, r, C_PRICE,f"{'PRICE':<9}",             colors["dim"], bold=True)
+    _put(stdscr, r, C_CHG,  f"{'CHG %':<9}",             colors["dim"], bold=True)
+    _put(stdscr, r, C_IVRK, f"{'IV RANK':<9}",           colors["dim"], bold=True)
+    if C_IMPL < width - 4:
+        _put(stdscr, r, C_IMPL, f"{'IMPL MV%':<9}",      colors["dim"], bold=True)
     r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
 
@@ -253,20 +238,18 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         is_sel  = abs_idx == sel
 
         sym    = _sym(row_data)[:7]
-        typ    = _type_short(row_data)[:5]
-        strike = _strike(row_data)[:7]
-        expiry = _exp(row_data)[:11]
-        vol    = _vol(row_data)[:9]
-        oi     = _oi(row_data)[:9]
-        voi    = _voloi(row_data)[:7]
-        iv     = _iv(row_data)[:9]
-        stpx   = _base_px(row_data)[:9]
-        dte    = _dte(row_data)[:7]
-        delta  = _delta(row_data)[:8]
+        tc     = _time(row_data)[:5]
+        name   = _name(row_data)[:name_w]
+        date   = _date(row_data)[:11]
+        price  = _price(row_data)[:9]
+        chg    = _chg(row_data)[:9]
+        ivrk   = _ivrank(row_data)[:9]
+        impl   = _implmvp(row_data)[:9]
 
-        type_color = (colors.get("positive") if typ == "CALL"
-                      else colors.get("negative") if typ == "PUT"
+        time_color = (colors.get("positive") if tc == "BMO"
+                      else colors.get("negative") if tc == "AMC"
                       else colors["dim"])
+        chg_col    = _chg_color(row_data, colors)
 
         if is_sel:
             try:
@@ -286,28 +269,24 @@ def render(stdscr, cache: dict, colors: dict) -> None:
                     pass
 
             _rp(C_SYM,   f"{sym:<7}")
-            _rp(C_TYPE,  f"{typ:<5}")
-            _rp(C_STR,   f"{strike:<7}")
-            _rp(C_EXP,   f"{expiry:<11}")
-            _rp(C_VOL,   f"{vol:<9}")
-            _rp(C_OI,    f"{oi:<9}")
-            _rp(C_VOLOI, f"{voi:<7}")
-            _rp(C_IV,    f"{iv:<9}")
-            if width >= 88:  _rp(C_STPX,  f"{stpx:<9}")
-            if width >= 98:  _rp(C_DTE,   f"{dte:<7}")
-            if width >= 108: _rp(C_DELTA, f"{delta:<8}")
+            _rp(C_TIME,  f"{tc:<5}")
+            _rp(C_NAME,  f"{name:<{name_w}}")
+            _rp(C_DATE,  f"{date:<11}")
+            _rp(C_PRICE, f"{price:<9}")
+            _rp(C_CHG,   f"{chg:<9}")
+            _rp(C_IVRK,  f"{ivrk:<9}")
+            if C_IMPL < width - 4:
+                _rp(C_IMPL, f"{impl:<9}")
         else:
-            _put(stdscr, r, C_SYM,   f"{sym:<7}",    colors["orange"])
-            _put(stdscr, r, C_TYPE,  f"{typ:<5}",    type_color)
-            _put(stdscr, r, C_STR,   f"{strike:<7}", colors["dim"])
-            _put(stdscr, r, C_EXP,   f"{expiry:<11}", colors["dim"])
-            _put(stdscr, r, C_VOL,   f"{vol:<9}",    colors["dim"])
-            _put(stdscr, r, C_OI,    f"{oi:<9}",     colors["dim"])
-            _put(stdscr, r, C_VOLOI, f"{voi:<7}",    colors["dim"])
-            _put(stdscr, r, C_IV,    f"{iv:<9}",     colors["dim"])
-            if width >= 88:  _put(stdscr, r, C_STPX,  f"{stpx:<9}",  colors["dim"])
-            if width >= 98:  _put(stdscr, r, C_DTE,   f"{dte:<7}",   colors["dim"])
-            if width >= 108: _put(stdscr, r, C_DELTA, f"{delta:<8}", colors["dim"])
+            _put(stdscr, r, C_SYM,   f"{sym:<7}",         colors["orange"])
+            _put(stdscr, r, C_TIME,  f"{tc:<5}",           time_color, bold=True)
+            _put(stdscr, r, C_NAME,  f"{name:<{name_w}}",  colors["dim"])
+            _put(stdscr, r, C_DATE,  f"{date:<11}",        colors["dim"])
+            _put(stdscr, r, C_PRICE, f"{price:<9}",        colors["dim"])
+            _put(stdscr, r, C_CHG,   f"{chg:<9}",          chg_col)
+            _put(stdscr, r, C_IVRK,  f"{ivrk:<9}",         colors["dim"])
+            if C_IMPL < width - 4:
+                _put(stdscr, r, C_IMPL, f"{impl:<9}",      colors["dim"])
 
         r += 1
 
@@ -325,29 +304,26 @@ def render(stdscr, cache: dict, colors: dict) -> None:
 
 def _render_detail(stdscr, r: int, row_data: dict,
                    colors: dict, sep: str, width: int) -> None:
-    """Expanded view for a single unusual options contract."""
-
     def lv(row, label, value, val_color=None):
-        _put(stdscr, row, 2,  f"{label:<20}", colors["dim"])
-        _put(stdscr, row, 22, str(value),     val_color or colors["orange"])
+        _put(stdscr, row, 2,  f"{label:<22}", colors["dim"])
+        _put(stdscr, row, 24, str(value),     val_color or colors["orange"])
 
     sym    = _sym(row_data)
     name   = _name(row_data)
-    typ    = _type_short(row_data)
-    expiry = _exp(row_data)
-    strike = _strike(row_data)
-    vol    = _vol(row_data)
-    oi     = _oi(row_data)
-    voi    = _voloi(row_data)
-    iv     = _iv(row_data)
-    bid    = _bid(row_data)
-    ask    = _ask(row_data)
-    last   = _last(row_data)
-    time_  = _time(row_data)
+    date   = _date(row_data)
+    tc     = _time(row_data)
+    price  = _price(row_data)
+    chg    = _chg(row_data)
+    ivrk   = _ivrank(row_data)
+    impl   = _implmv(row_data)
+    implp  = _implmvp(row_data)
+    optvol = _optvol(row_data)
+    last   = _lasttrd(row_data)
 
-    type_color = (colors.get("positive") if typ == "CALL"
-                  else colors.get("negative") if typ == "PUT"
+    time_color = (colors.get("positive") if tc == "BMO"
+                  else colors.get("negative") if tc == "AMC"
                   else colors["dim"])
+    chg_col    = _chg_color(row_data, colors)
 
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
     _put(stdscr, r, 2, sym, colors["orange"], bold=True)
@@ -355,27 +331,18 @@ def _render_detail(stdscr, r: int, row_data: dict,
         _put(stdscr, r, 2 + len(sym) + 2, name[:width - len(sym) - 10],
              colors["header"], bold=True)
     r += 1
-    _put(stdscr, r, 2, typ, type_color, bold=True); r += 1
+    _put(stdscr, r, 2, tc, time_color, bold=True); r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
 
-    base_px   = _base_px(row_data)
-    delta     = _delta(row_data)
-    moneyness = _moneyness(row_data)
-    dte       = _dte(row_data)
-
-    lv(r, "Expiration:",    f"{expiry}  ({dte}d)" if dte else expiry);  r += 1
-    lv(r, "Strike:",        strike);                                     r += 1
-    lv(r, "Moneyness:",     moneyness);                                  r += 1
-    lv(r, "Stock Price:",   base_px);                                    r += 1
-    lv(r, "Volume:",        vol);                                        r += 1
-    lv(r, "Open Interest:", oi);                                         r += 1
-    lv(r, "Vol/OI Ratio:",  voi);                                        r += 1
-    lv(r, "IV:",            iv);                                         r += 1
-    lv(r, "Delta:",         delta);                                      r += 1
-    lv(r, "Bid:",           bid);                                        r += 1
-    lv(r, "Ask:",           ask);                                        r += 1
-    lv(r, "Last:",          last);                                       r += 1
-    lv(r, "Time:",          time_);                                      r += 1
+    lv(r, "Earnings Date:",      date);                    r += 1
+    lv(r, "Report Time:",        tc,    time_color);       r += 1
+    lv(r, "Stock Price:",        price);                   r += 1
+    lv(r, "Change %:",           chg,   chg_col);          r += 1
+    lv(r, "IV Rank (1yr):",      ivrk);                   r += 1
+    lv(r, "Implied Move $:",     impl);                    r += 1
+    lv(r, "Implied Move %:",     implp);                   r += 1
+    lv(r, "Options Volume:",     optvol);                  r += 1
+    lv(r, "Last Trade:",         last);                    r += 1
 
     r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
