@@ -62,6 +62,7 @@ from commands import cmd_exec
 from commands import cmd_div
 from commands import cmd_own
 from commands import cmd_sent
+from commands import cmd_uo
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -187,6 +188,14 @@ COMMAND_REGISTRY = [
         "exact":  False,
         "fetch":  cmd_sent.fetch,
         "render": cmd_sent.render,
+    },
+    # ── Unusual Options Activity ──────────────────────────────────────────
+    {
+        "prefix":      "UO",
+        "exact":       True,
+        "fetch":       cmd_uo.fetch,
+        "render":      cmd_uo.render,
+        "on_keypress": cmd_uo.on_keypress,
     },
 ]
 

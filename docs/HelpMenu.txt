@@ -9,17 +9,14 @@
 
   Q <Ticker>                       - Live quote
 
-  N                                - Market news feed (all headlines)
-  N <Ticker>                       - Company-specific news  e.g. N AAPL
-                                     ↑ ↓  navigate   Enter  expand / collapse article
-
   IPO [from] [to]                  - IPO Calendar (past 30d + next 90d by default)
                                      e.g. IPO 2025-01-01 2025-06-30
                                      ↑ ↓  navigate list
                                      Enter  expand / collapse details
                                      ← →  filter by status: ALL / PRICED / EXPECTED / FILED / WITHDRAWN
+                                     
   GIP <Ticker> [Timeframe]         - Price chart
-                                     Timeframes: 1W  1M  3M  YTD  1Y  (default 1Y)
+                                     Timeframes: 1W  1M  3M  YTD  1Y
                                      ← → to cycle timeframes in pane mode
 
   DES <Ticker>                     - Company description and profile
@@ -55,6 +52,15 @@
 
   SHIP <Lane>        - Live AIS vessel tracking
                        Lanes: HORMUZ
+
+  UO                 - Unusual options activity (scraped daily at 4:05 PM ET)
+                       ↑ ↓  navigate   ← →  filter CALL / PUT
+                       Enter  expand / collapse contract detail
+
+  N                  - Market news feed (all headlines)
+
+  N <Ticker>         - Company-specific news  e.g. N AAPL
+                       ↑ ↓  navigate   Enter  expand / collapse article
 
 ## Account
 

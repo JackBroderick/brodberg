@@ -91,6 +91,14 @@ _TTL_INSIDER        = 1800    # 30 minutes
 _TTL_SENTIMENT      = 300
 
 
+# ---------------------------------------------------------------------------
+# Unusual Options Activity store
+# Populated by _uo_scheduler(); persisted to/from DB across restarts.
+# ---------------------------------------------------------------------------
+
+_unusual_options: dict = {"data": [], "as_of": None}
+
+
 def _cache_get(key: str):
     with _cache_lock:
         entry = _cache.get(key)
@@ -238,7 +246,151 @@ def _init_db() -> None:
                     location      TEXT    NOT NULL DEFAULT ''
                 )
             """)
+        # Unusual options — same schema for both DBs (all TEXT)
+        _execute(conn, """
+            CREATE TABLE IF NOT EXISTS unusual_options (
+                trade_date TEXT PRIMARY KEY,
+                data       TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Unusual Options — DB helpers and background scraper
+# ---------------------------------------------------------------------------
+
+def _uo_save_db(trade_date: str, rows: list) -> None:
+    try:
+        with _db_conn() as conn:
+            _execute(conn,
+                "INSERT INTO unusual_options (trade_date, data, fetched_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT (trade_date) DO UPDATE SET "
+                "data = excluded.data, fetched_at = excluded.fetched_at",
+                (trade_date, json.dumps(rows),
+                 datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+    except Exception as e:
+        print(f"[UO] db save error: {e}")
+
+
+def _uo_load_db() -> None:
+    """Load the most recent UO snapshot from DB into the in-memory store."""
+    try:
+        with _db_conn() as conn:
+            cur = _execute(conn,
+                "SELECT trade_date, data FROM unusual_options "
+                "ORDER BY trade_date DESC LIMIT 1")
+            row = cur.fetchone()
+        if row:
+            _unusual_options["data"]  = json.loads(row["data"])
+            _unusual_options["as_of"] = row["trade_date"]
+            print(f"[UO] loaded {len(_unusual_options['data'])} rows "
+                  f"for {_unusual_options['as_of']} from DB")
+    except Exception as e:
+        print(f"[UO] db load error: {e}")
+
+
+async def _scrape_unusual_options() -> None:
+    """
+    Fetch Barchart unusual options activity via their CSV download endpoint.
+
+    Steps:
+      1. GET the page to receive session cookies (incl. XSRF-TOKEN).
+      2. GET the download URL with X-XSRF-Token header → CSV response.
+      3. Parse, normalise, store in memory and persist to DB.
+    """
+    import csv
+    from io import StringIO
+    from urllib.parse import unquote
+    from datetime import date as _date
+
+    base_url = "https://www.barchart.com/options/unusual-activity/stocks"
+    today    = _date.today().strftime("%Y-%m-%d")
+
+    hdrs = {
+        "User-Agent":      ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"),
+        "Accept":          ("text/html,application/xhtml+xml,application/xml;"
+                            "q=0.9,image/webp,*/*;q=0.8"),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection":      "keep-alive",
+    }
+
+    try:
+        # Step 1 — land on the page to collect cookies
+        r1      = await _http_client.get(base_url, headers=hdrs,
+                                         follow_redirects=True, timeout=30.0)
+        xsrf    = unquote(r1.cookies.get("XSRF-TOKEN", ""))
+        cookies = dict(r1.cookies)
+
+        if not xsrf:
+            print("[UO] XSRF-TOKEN not found in cookies — scrape aborted")
+            return
+
+        # Step 2 — download the CSV
+        dl_hdrs = {
+            **hdrs,
+            "Referer":     base_url,
+            "X-XSRF-Token": xsrf,
+        }
+        r2 = await _http_client.get(
+            f"{base_url}?startDate={today}&download=true",
+            headers=dl_hdrs,
+            cookies=cookies,
+            follow_redirects=True,
+            timeout=30.0,
+        )
+
+        ct = r2.headers.get("content-type", "")
+        if r2.status_code != 200 or (len(r2.text) < 100 and "text/csv" not in ct):
+            print(f"[UO] unexpected response {r2.status_code}: {r2.text[:200]}")
+            return
+
+        reader = csv.DictReader(StringIO(r2.text))
+        rows   = [{k.strip(): (v or "").strip() for k, v in row.items()}
+                  for row in reader]
+
+        if not rows:
+            print("[UO] CSV contained 0 rows")
+            return
+
+        _unusual_options["data"]  = rows
+        _unusual_options["as_of"] = today
+        _uo_save_db(today, rows)
+        print(f"[UO] scraped {len(rows)} rows for {today}")
+
+    except Exception as e:
+        print(f"[UO] scrape exception: {e}")
+
+
+async def _uo_scheduler() -> None:
+    """
+    On startup: seed in-memory store from DB.
+    Then: scrape Barchart once per weekday at or after 4:05 PM ET.
+    """
+    from zoneinfo import ZoneInfo
+
+    _uo_load_db()
+    last_date: str | None = _unusual_options.get("as_of")  # skip re-scrape if fresh
+
+    while True:
+        try:
+            et        = datetime.now(ZoneInfo("America/New_York"))
+            today_str = et.strftime("%Y-%m-%d")
+            # Fire on weekdays (Mon–Fri) at 4:05 PM ET or later
+            if (et.weekday() < 5
+                    and (et.hour > 16 or (et.hour == 16 and et.minute >= 5))
+                    and last_date != today_str):
+                await _scrape_unusual_options()
+                last_date = today_str
+        except Exception as e:
+            print(f"[UO] scheduler error: {e}")
+        await asyncio.sleep(30)
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +435,7 @@ async def lifespan(app: FastAPI):
     _init_db()
     asyncio.create_task(_rest_bench_poll())
     asyncio.create_task(_finnhub_ws_bench())
+    asyncio.create_task(_uo_scheduler())
     yield
     await _http_client.aclose()
     if _pool:
@@ -587,6 +740,11 @@ async def proxy_sentiment(symbol: str):
 @app.get("/api/live/benchmarks")
 async def live_benchmarks():
     return dict(_live_prices)
+
+
+@app.get("/api/unusual-options")
+async def get_unusual_options():
+    return _unusual_options
 
 
 # ---------------------------------------------------------------------------
