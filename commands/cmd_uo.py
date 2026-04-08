@@ -47,10 +47,14 @@ def _vol(r):    return _get(r, "Volume")
 def _oi(r):     return _get(r, "Open Interest")
 def _voloi(r):  return _get(r, "Vol/OI Ratio", "Vol/OI")
 def _iv(r):     return _get(r, "IV", "IV %", "Implied Volatility")
-def _bid(r):    return _get(r, "Bid")
-def _ask(r):    return _get(r, "Ask")
-def _last(r):   return _get(r, "Last Price", "Last")
-def _time(r):   return _get(r, "Time")
+def _bid(r):       return _get(r, "Bid")
+def _ask(r):       return _get(r, "Ask")
+def _last(r):      return _get(r, "Last Price", "Last")
+def _time(r):      return _get(r, "Time")
+def _base_px(r):   return _get(r, "Base Price")
+def _delta(r):     return _get(r, "Delta")
+def _moneyness(r): return _get(r, "Moneyness")
+def _dte(r):       return _get(r, "DTE")
 
 
 def _type_short(row: dict) -> str:
@@ -338,16 +342,24 @@ def _render_detail(stdscr, r: int, row_data: dict,
     _put(stdscr, r, 2, typ, type_color, bold=True); r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1
 
-    lv(r, "Expiration:",    expiry);                        r += 1
-    lv(r, "Strike:",        strike);                        r += 1
-    lv(r, "Volume:",        vol);                           r += 1
-    lv(r, "Open Interest:", oi);                            r += 1
-    lv(r, "Vol/OI Ratio:",  voi);                           r += 1
-    lv(r, "IV:",            iv);                            r += 1
-    lv(r, "Bid:",           bid);                           r += 1
-    lv(r, "Ask:",           ask);                           r += 1
-    lv(r, "Last:",          last);                          r += 1
-    lv(r, "Time:",          time_);                         r += 1
+    base_px   = _base_px(row_data)
+    delta     = _delta(row_data)
+    moneyness = _moneyness(row_data)
+    dte       = _dte(row_data)
+
+    lv(r, "Expiration:",    f"{expiry}  ({dte}d)" if dte else expiry);  r += 1
+    lv(r, "Strike:",        strike);                                     r += 1
+    lv(r, "Moneyness:",     moneyness);                                  r += 1
+    lv(r, "Stock Price:",   base_px);                                    r += 1
+    lv(r, "Volume:",        vol);                                        r += 1
+    lv(r, "Open Interest:", oi);                                         r += 1
+    lv(r, "Vol/OI Ratio:",  voi);                                        r += 1
+    lv(r, "IV:",            iv);                                         r += 1
+    lv(r, "Delta:",         delta);                                      r += 1
+    lv(r, "Bid:",           bid);                                        r += 1
+    lv(r, "Ask:",           ask);                                        r += 1
+    lv(r, "Last:",          last);                                       r += 1
+    lv(r, "Time:",          time_);                                      r += 1
 
     r += 1
     _put(stdscr, r, 0, sep, colors["dim"]); r += 1

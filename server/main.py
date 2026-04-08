@@ -337,17 +337,31 @@ async def _scrape_unusual_options() -> dict:
             print(f"[UO] {msg}")
             return {"ok": False, "rows": 0, "error": "no_xsrf", "detail": msg}
 
-        # Step 2 — call Barchart's internal JSON API (what their JS frontend uses)
-        api_url = "https://www.barchart.com/proxies/core-api/v1/options/get"
-        params  = {
-            "fields":  ("baseSymbol,symbol,optionType,strikePrice,expirationDate,"
-                        "tradeTime,lastPrice,bidPrice,askPrice,volume,openInterest,"
-                        "tradeIv,volumeOpenInterestRatio"),
-            "unusual": "true",
-            "raw":     "1",
-            "page":    "1",
-            "limit":   "200",
-        }
+        # Step 2 — call Barchart's internal JSON API using their exact filter params
+        # (reverse-engineered from browser Network tab on /options/unusual-activity/stocks)
+        from datetime import date as _date2, timedelta
+        today_s     = _date.today().strftime("%Y-%m-%d")
+        yesterday_s = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        qs = (
+            "fields=symbol,baseSymbol,baseLastPrice,expirationDate,"
+            "daysToExpiration,strikePrice,moneyness,bidPrice,lastPrice,"
+            "askPrice,volume,openInterest,volumeOpenInterestRatio,"
+            "weightedImpliedVolatility,delta,tradeTime"
+            "&orderBy=volumeOpenInterestRatio&orderDir=desc"
+            "&baseSymbolTypes=stock"
+            "&between(volumeOpenInterestRatio,1.24,)="
+            "&between(lastPrice,.10,)="
+            f"&between(tradeTime,{yesterday_s},{today_s})="
+            "&between(volume,500,)="
+            "&between(openInterest,100,)="
+            "&in(exchange,(AMEX,NYSE,NASDAQ,INDEX-CBOE))="
+            "&limit=100"
+            "&meta=field.shortName,field.type,field.description"
+            "&hasOptions=true"
+            "&raw=1"
+        )
+        api_url  = f"https://www.barchart.com/proxies/core-api/v1/options/get?{qs}"
         api_hdrs = {
             **hdrs,
             "Referer":      base_url,
@@ -357,7 +371,6 @@ async def _scrape_unusual_options() -> dict:
 
         r2 = await _http_client.get(
             api_url,
-            params=params,
             headers=api_hdrs,
             cookies=cookies,
             follow_redirects=True,
@@ -423,18 +436,22 @@ async def _scrape_unusual_options() -> dict:
                 time_s  = str(r.get("tradeTime", ""))
 
             rows.append({
-                "Symbol":          str(r.get("baseSymbol",              occ_tick)),
-                "Put/Call":        str(r.get("optionType",              occ_type)),
-                "Strike":          str(r.get("strikePrice",             "")),
+                "Symbol":          str(r.get("baseSymbol",                  occ_tick)),
+                "Put/Call":        occ_type or str(r.get("symbolType",      "")),
+                "Strike":          str(r.get("strikePrice",                 "")),
                 "Expiration Date": exp_fmt,
-                "Volume":          str(r.get("volume",                  "")),
-                "Open Interest":   str(r.get("openInterest",            "")),
-                "Vol/OI Ratio":    str(r.get("volumeOpenInterestRatio", "")),
-                "Bid":             str(r.get("bidPrice",                "")),
-                "Ask":             str(r.get("askPrice",                "")),
-                "Last Price":      str(r.get("lastPrice",               "")),
-                "IV":              str(r.get("tradeIv",                 "")),
+                "Volume":          str(r.get("volume",                      "")),
+                "Open Interest":   str(r.get("openInterest",                "")),
+                "Vol/OI Ratio":    str(r.get("volumeOpenInterestRatio",     "")),
+                "Bid":             str(r.get("bidPrice",                    "")),
+                "Ask":             str(r.get("askPrice",                    "")),
+                "Last Price":      str(r.get("lastPrice",                   "")),
+                "IV":              str(r.get("weightedImpliedVolatility",   "")),
                 "Time":            time_s,
+                "Base Price":      str(r.get("baseLastPrice",               "")),
+                "Delta":           str(r.get("delta",                       "")),
+                "Moneyness":       str(r.get("moneyness",                   "")),
+                "DTE":             str(r.get("daysToExpiration",            "")),
             })
 
         _unusual_options["data"]  = rows
