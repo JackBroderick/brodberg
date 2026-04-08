@@ -378,6 +378,11 @@ async def _uo_scheduler() -> None:
     _uo_load_db()
     last_date: str | None = _unusual_options.get("as_of")  # skip re-scrape if fresh
 
+    # On first deploy (no DB data yet), scrape immediately so UO works right away
+    if last_date is None:
+        await _scrape_unusual_options()
+        last_date = _unusual_options.get("as_of")
+
     while True:
         try:
             et        = datetime.now(ZoneInfo("America/New_York"))
