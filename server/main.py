@@ -293,14 +293,13 @@ def _uo_load_db() -> None:
         print(f"[UO] db load error: {e}")
 
 
-async def _scrape_unusual_options() -> None:
+async def _scrape_unusual_options() -> dict:
     """
     Fetch Barchart unusual options activity via their CSV download endpoint.
 
-    Steps:
-      1. GET the page to receive session cookies (incl. XSRF-TOKEN).
-      2. GET the download URL with X-XSRF-Token header → CSV response.
-      3. Parse, normalise, store in memory and persist to DB.
+    Returns a diagnostic dict with keys:
+      ok (bool), rows (int), error (str|None), detail (str)
+    so callers can surface failures without digging through logs.
     """
     import csv
     from io import StringIO
@@ -322,50 +321,68 @@ async def _scrape_unusual_options() -> None:
     }
 
     try:
-        # Step 1 — land on the page to collect cookies
+        # Step 1 — land on the page to collect session cookies (esp. XSRF-TOKEN)
         r1      = await _http_client.get(base_url, headers=hdrs,
                                          follow_redirects=True, timeout=30.0)
         xsrf    = unquote(r1.cookies.get("XSRF-TOKEN", ""))
         cookies = dict(r1.cookies)
 
+        diag_step1 = {
+            "status": r1.status_code,
+            "cookies": list(cookies.keys()),
+            "xsrf_found": bool(xsrf),
+            "body_preview": r1.text[:300],
+        }
+
         if not xsrf:
-            print("[UO] XSRF-TOKEN not found in cookies — scrape aborted")
-            return
+            msg = f"XSRF-TOKEN not in cookies. step1={diag_step1}"
+            print(f"[UO] {msg}")
+            return {"ok": False, "rows": 0, "error": "no_xsrf", "detail": msg}
 
         # Step 2 — download the CSV
-        dl_hdrs = {
-            **hdrs,
-            "Referer":     base_url,
-            "X-XSRF-Token": xsrf,
-        }
         r2 = await _http_client.get(
             f"{base_url}?startDate={today}&download=true",
-            headers=dl_hdrs,
+            headers={**hdrs, "Referer": base_url, "X-XSRF-Token": xsrf},
             cookies=cookies,
             follow_redirects=True,
             timeout=30.0,
         )
 
-        ct = r2.headers.get("content-type", "")
-        if r2.status_code != 200 or (len(r2.text) < 100 and "text/csv" not in ct):
-            print(f"[UO] unexpected response {r2.status_code}: {r2.text[:200]}")
-            return
+        ct   = r2.headers.get("content-type", "")
+        body = r2.text
 
-        reader = csv.DictReader(StringIO(r2.text))
+        diag_step2 = {
+            "status": r2.status_code,
+            "content_type": ct,
+            "body_len": len(body),
+            "body_preview": body[:300],
+        }
+
+        if r2.status_code != 200:
+            msg = f"CSV download returned {r2.status_code}. step2={diag_step2}"
+            print(f"[UO] {msg}")
+            return {"ok": False, "rows": 0, "error": "bad_status", "detail": msg}
+
+        reader = csv.DictReader(StringIO(body))
         rows   = [{k.strip(): (v or "").strip() for k, v in row.items()}
                   for row in reader]
 
         if not rows:
-            print("[UO] CSV contained 0 rows")
-            return
+            msg = f"CSV parsed but 0 rows. step2={diag_step2}"
+            print(f"[UO] {msg}")
+            return {"ok": False, "rows": 0, "error": "empty_csv", "detail": msg}
 
         _unusual_options["data"]  = rows
         _unusual_options["as_of"] = today
         _uo_save_db(today, rows)
         print(f"[UO] scraped {len(rows)} rows for {today}")
+        return {"ok": True, "rows": len(rows), "error": None,
+                "detail": f"scraped {len(rows)} rows for {today}"}
 
     except Exception as e:
-        print(f"[UO] scrape exception: {e}")
+        msg = str(e)
+        print(f"[UO] scrape exception: {msg}")
+        return {"ok": False, "rows": 0, "error": "exception", "detail": msg}
 
 
 async def _uo_scheduler() -> None:
@@ -380,7 +397,8 @@ async def _uo_scheduler() -> None:
 
     # On first deploy (no DB data yet), scrape immediately so UO works right away
     if last_date is None:
-        await _scrape_unusual_options()
+        result = await _scrape_unusual_options()
+        print(f"[UO] startup scrape: {result}")
         last_date = _unusual_options.get("as_of")
 
     while True:
@@ -750,6 +768,15 @@ async def live_benchmarks():
 @app.get("/api/unusual-options")
 async def get_unusual_options():
     return _unusual_options
+
+
+@app.get("/api/unusual-options/refresh")
+async def refresh_unusual_options():
+    """Trigger an immediate scrape and return full diagnostic info."""
+    result = await _scrape_unusual_options()
+    return {**result, "store": {"as_of": _unusual_options.get("as_of"),
+                                "row_count": len(_unusual_options.get("data", []))}}
+
 
 
 # ---------------------------------------------------------------------------
