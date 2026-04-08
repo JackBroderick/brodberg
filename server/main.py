@@ -814,8 +814,10 @@ async def get_unusual_options():
 async def refresh_unusual_options():
     """Trigger an immediate scrape and return full diagnostic info."""
     result = await _scrape_unusual_options()
-    return {**result, "store": {"as_of": _unusual_options.get("as_of"),
-                                "row_count": len(_unusual_options.get("data", []))}}
+    sample = _unusual_options.get("data", [])[:2]   # first 2 rows so we can inspect fields
+    return {**result, "sample": sample,
+            "store": {"as_of": _unusual_options.get("as_of"),
+                      "row_count": len(_unusual_options.get("data", []))}}
 
 
 
