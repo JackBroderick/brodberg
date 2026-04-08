@@ -56,6 +56,7 @@ from commands import cmd_comd
 from commands import cmd_fx
 from commands import cmd_user
 from commands import cmd_ipo
+from commands import cmd_news
 from commands import cmd_peers
 from commands import cmd_exec
 from commands import cmd_div
@@ -139,6 +140,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_user.fetch,
         "render":      cmd_user.render,
         "on_keypress": cmd_user.on_keypress,
+    },
+    # ── News feed ────────────────────────────────────────────────────────────
+    {
+        "prefix":      "N",
+        "exact":       False,
+        "fetch":       cmd_news.fetch,
+        "render":      cmd_news.render,
+        "on_keypress": cmd_news.on_keypress,
     },
     # ── IPO Calendar ─────────────────────────────────────────────────────────
     {

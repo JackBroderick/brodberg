@@ -74,7 +74,8 @@ def init_colors() -> dict:
     curses.init_pair(6, curses.COLOR_BLUE,  curses.COLOR_BLUE)  # blue on blue (water)
     curses.init_pair(7, curses.COLOR_BLACK, orange)             # black on orange (land label)
     curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLUE)  # white on blue (water label)
-    curses.init_pair(9, curses.COLOR_GREEN, curses.COLOR_BLUE)  # green on blue (ship on water)
+    curses.init_pair(9,  curses.COLOR_GREEN, curses.COLOR_BLUE)  # green on blue (ship on water)
+    curses.init_pair(10, curses.COLOR_BLACK, curses.COLOR_WHITE) # black on white (selected row)
 
     return {
         "orange":      curses.color_pair(1),
@@ -86,4 +87,5 @@ def init_colors() -> dict:
         "land_label":  curses.color_pair(7),
         "water_label": curses.color_pair(8),
         "ship":        curses.color_pair(9),
+        "highlight":   curses.color_pair(10),
     }

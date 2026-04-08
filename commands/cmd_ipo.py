@@ -129,13 +129,12 @@ def fetch(parts: list) -> dict:
             "expanded":      False,
             "status_filter": "ALL",
             "page_offset":   0,
-            "form_mode":     True,   # routes Enter key through on_keypress
         }
     except Exception as e:
         return {
             "error": str(e), "ipos": [], "from": frm, "to": to,
             "selected": 0, "expanded": False, "status_filter": "ALL",
-            "page_offset": 0, "form_mode": True,
+            "page_offset": 0,
         }
 
 
@@ -283,10 +282,8 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     # ── IPO rows ──────────────────────────────────────────────────────────
     visible = filtered[page_offset: page_offset + _VISIBLE_ROWS]
     for i, ipo in enumerate(visible):
-        abs_idx    = page_offset + i
-        is_sel     = abs_idx == selected
-        row_color  = colors["header"]
-        bg_attr    = curses.A_REVERSE if is_sel else 0
+        abs_idx = page_offset + i
+        is_sel  = abs_idx == selected
 
         date    = (ipo.get("date") or "N/A")[:10]
         name    = (ipo.get("name") or "N/A")[:30]
@@ -295,38 +292,41 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         price   = (str(ipo.get("price") or "N/A"))[:9]
         status  = ipo.get("status", "")
         s_label = _status_label(status)[:9]
-        s_color = _status_color(status, colors)
 
-        # Highlight selected row
         if is_sel:
+            # Fill entire row with highlight background
             try:
-                stdscr.attron(curses.A_BOLD)
-                stdscr.addstr(r, 0, " " * min(width - 1, 90))
-                stdscr.attroff(curses.A_BOLD)
+                stdscr.attron(colors["highlight"] | curses.A_BOLD)
+                stdscr.addstr(r, 0, " " * min(width - 1, 92))
+                stdscr.attroff(colors["highlight"] | curses.A_BOLD)
             except Exception:
                 pass
-            row_color = colors["orange"]
+            row_attr = colors["highlight"] | curses.A_BOLD
 
-        attr = (row_color | curses.A_BOLD) if is_sel else row_color
+            def _row_put(col, text):
+                try:
+                    stdscr.attron(row_attr)
+                    stdscr.addstr(r, col, text)
+                    stdscr.attroff(row_attr)
+                except Exception:
+                    pass
 
-        def _row_put(col, text):
-            try:
-                stdscr.attron(attr)
-                stdscr.addstr(r, col, text)
-                stdscr.attroff(attr)
-            except Exception:
-                pass
-
-        _row_put(C_DATE,   f"{date:<11}")
-        _row_put(C_NAME,   f"{name:<31}")
-        _row_put(C_SYM,    f"{sym:<7}")
-        _row_put(C_SHARES, f"{shares:<11}")
-        _row_put(C_PRICE,  f"{price:<10}")
-        if C_STATUS < width - 4:
-            if is_sel:
+            _row_put(C_DATE,   f"{date:<11}")
+            _row_put(C_NAME,   f"{name:<31}")
+            _row_put(C_SYM,    f"{sym:<7}")
+            _row_put(C_SHARES, f"{shares:<11}")
+            _row_put(C_PRICE,  f"{price:<10}")
+            if C_STATUS < width - 4:
                 _row_put(C_STATUS, s_label)
-            else:
-                _put(stdscr, r, C_STATUS, s_label, s_color)
+        else:
+            # Normal row: white on black, status colored
+            _put(stdscr, r, C_DATE,   f"{date:<11}",   colors["dim"])
+            _put(stdscr, r, C_NAME,   f"{name:<31}",   colors["dim"])
+            _put(stdscr, r, C_SYM,    f"{sym:<7}",     colors["dim"])
+            _put(stdscr, r, C_SHARES, f"{shares:<11}", colors["dim"])
+            _put(stdscr, r, C_PRICE,  f"{price:<10}",  colors["dim"])
+            if C_STATUS < width - 4:
+                _put(stdscr, r, C_STATUS, s_label, _status_color(status, colors))
 
         r += 1
 

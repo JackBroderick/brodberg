@@ -270,9 +270,10 @@ def main(stdscr):
                         pass
                     focused_pane = (focused_pane + 1) % MAX_PANES
 
-                # Arrow keys — route to active command's on_keypress handler
+                # Arrow keys + Enter — route to active command's on_keypress handler
                 elif key in (curses.KEY_UP, curses.KEY_DOWN,
-                             curses.KEY_LEFT, curses.KEY_RIGHT):
+                             curses.KEY_LEFT, curses.KEY_RIGHT,
+                             curses.KEY_ENTER, 10, 13):
                     pane["cache"] = dispatch_keypress(
                         key,
                         pane["activecommand"],

@@ -9,6 +9,10 @@
 
   Q <Ticker>                       - Live quote
 
+  N                                - Market news feed (all headlines)
+  N <Ticker>                       - Company-specific news  e.g. N AAPL
+                                     ↑ ↓  navigate   Enter  expand / collapse article
+
   IPO [from] [to]                  - IPO Calendar (past 30d + next 90d by default)
                                      e.g. IPO 2025-01-01 2025-06-30
                                      ↑ ↓  navigate list

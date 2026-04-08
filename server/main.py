@@ -478,6 +478,24 @@ async def proxy_forex_candles(symbol: str, resolution: str = "D",
     return data
 
 
+@app.get("/api/company-news/{symbol}")
+async def proxy_company_news(symbol: str):
+    from datetime import date, timedelta
+    today     = date.today()
+    from_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    to_date   = today.strftime("%Y-%m-%d")
+    key       = f"company-news:{symbol.upper()}:{to_date}"
+    cached    = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/company-news",
+                               params={"symbol": symbol.upper(), "from": from_date,
+                                       "to": to_date, "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_NEWS)
+    return data
+
+
 @app.get("/api/ipo")
 async def proxy_ipo(frm: str = "", to: str = ""):
     from datetime import date, timedelta
