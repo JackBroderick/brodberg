@@ -340,14 +340,13 @@ async def _scrape_unusual_options() -> dict:
         # Step 2 — call Barchart's internal JSON API (what their JS frontend uses)
         api_url = "https://www.barchart.com/proxies/core-api/v1/options/get"
         params  = {
-            "fields":      ("symbol,optionType,strikePrice,expiration,tradeTime,"
-                            "lastPrice,bidPrice,askPrice,volume,openInterest,"
-                            "impliedVolatility,volOiRatio"),
-            "unusual":     "true",
-            "raw":         "1",
-            "page":        "1",
-            "limit":       "200",
-            "hasOptions":  "true",
+            "fields":  ("baseSymbol,symbol,optionType,strikePrice,expirationDate,"
+                        "tradeTime,lastPrice,bidPrice,askPrice,volume,openInterest,"
+                        "tradeIv,volumeOpenInterestRatio"),
+            "unusual": "true",
+            "raw":     "1",
+            "page":    "1",
+            "limit":   "200",
         }
         api_hdrs = {
             **hdrs,
@@ -394,22 +393,48 @@ async def _scrape_unusual_options() -> dict:
             print(f"[UO] {msg}")
             return {"ok": False, "rows": 0, "error": "empty_data", "detail": msg}
 
+        import datetime as _dt
+
         rows = []
         for rec in raw_records:
             r = rec.get("raw", rec)   # unwrap {"raw": {...}} if present
+
+            # Parse OCC symbol "AAPL|20260515|111.00C" as fallback source
+            occ       = str(r.get("symbol", ""))
+            occ_parts = occ.split("|")
+            occ_tick  = occ_parts[0] if occ_parts else ""
+            occ_exp   = occ_parts[1] if len(occ_parts) > 1 else ""
+            occ_st    = occ_parts[2] if len(occ_parts) > 2 else ""   # e.g. "111.00C"
+            occ_type  = ("Call" if occ_st.endswith("C") else
+                         "Put"  if occ_st.endswith("P") else "")
+
+            # Format expiration: YYYYMMDD → YYYY-MM-DD
+            exp_raw = str(r.get("expirationDate", "") or occ_exp)
+            if len(exp_raw) == 8 and exp_raw.isdigit():
+                exp_fmt = f"{exp_raw[:4]}-{exp_raw[4:6]}-{exp_raw[6:]}"
+            else:
+                exp_fmt = exp_raw
+
+            # Format trade time: unix ts → HH:MM
+            try:
+                ts      = int(r.get("tradeTime", 0) or 0)
+                time_s  = _dt.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
+            except Exception:
+                time_s  = str(r.get("tradeTime", ""))
+
             rows.append({
-                "Symbol":           str(r.get("symbol",           "")),
-                "Put/Call":         str(r.get("optionType",       "")),
-                "Strike":           str(r.get("strikePrice",      "")),
-                "Expiration Date":  str(r.get("expiration",       "")),
-                "Volume":           str(r.get("volume",           "")),
-                "Open Interest":    str(r.get("openInterest",     "")),
-                "Vol/OI Ratio":     str(r.get("volOiRatio",       "")),
-                "Bid":              str(r.get("bidPrice",         "")),
-                "Ask":              str(r.get("askPrice",         "")),
-                "Last Price":       str(r.get("lastPrice",        "")),
-                "IV":               str(r.get("impliedVolatility","")),
-                "Time":             str(r.get("tradeTime",        "")),
+                "Symbol":          str(r.get("baseSymbol",              occ_tick)),
+                "Put/Call":        str(r.get("optionType",              occ_type)),
+                "Strike":          str(r.get("strikePrice",             "")),
+                "Expiration Date": exp_fmt,
+                "Volume":          str(r.get("volume",                  "")),
+                "Open Interest":   str(r.get("openInterest",            "")),
+                "Vol/OI Ratio":    str(r.get("volumeOpenInterestRatio", "")),
+                "Bid":             str(r.get("bidPrice",                "")),
+                "Ask":             str(r.get("askPrice",                "")),
+                "Last Price":      str(r.get("lastPrice",               "")),
+                "IV":              str(r.get("tradeIv",                 "")),
+                "Time":            time_s,
             })
 
         _unusual_options["data"]  = rows
@@ -814,7 +839,7 @@ async def get_unusual_options():
 async def refresh_unusual_options():
     """Trigger an immediate scrape and return full diagnostic info."""
     result = await _scrape_unusual_options()
-    sample = _unusual_options.get("data", [])[:2]   # first 2 rows so we can inspect fields
+    sample = _unusual_options.get("data", [])[:3]   # first 3 normalized rows
     return {**result, "sample": sample,
             "store": {"as_of": _unusual_options.get("as_of"),
                       "row_count": len(_unusual_options.get("data", []))}}
