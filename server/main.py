@@ -301,8 +301,6 @@ async def _scrape_unusual_options() -> dict:
       ok (bool), rows (int), error (str|None), detail (str)
     so callers can surface failures without digging through logs.
     """
-    import csv
-    from io import StringIO
     from urllib.parse import unquote
     from datetime import date as _date
 
@@ -339,10 +337,29 @@ async def _scrape_unusual_options() -> dict:
             print(f"[UO] {msg}")
             return {"ok": False, "rows": 0, "error": "no_xsrf", "detail": msg}
 
-        # Step 2 — download the CSV
+        # Step 2 — call Barchart's internal JSON API (what their JS frontend uses)
+        api_url = "https://www.barchart.com/proxies/core-api/v1/options/get"
+        params  = {
+            "fields":      ("symbol,optionType,strikePrice,expiration,tradeTime,"
+                            "lastPrice,bidPrice,askPrice,volume,openInterest,"
+                            "impliedVolatility,volOiRatio"),
+            "unusual":     "true",
+            "raw":         "1",
+            "page":        "1",
+            "limit":       "200",
+            "hasOptions":  "true",
+        }
+        api_hdrs = {
+            **hdrs,
+            "Referer":      base_url,
+            "X-XSRF-Token": xsrf,
+            "Accept":       "application/json, text/plain, */*",
+        }
+
         r2 = await _http_client.get(
-            f"{base_url}?startDate={today}&download=true",
-            headers={**hdrs, "Referer": base_url, "X-XSRF-Token": xsrf},
+            api_url,
+            params=params,
+            headers=api_hdrs,
             cookies=cookies,
             follow_redirects=True,
             timeout=30.0,
@@ -352,25 +369,48 @@ async def _scrape_unusual_options() -> dict:
         body = r2.text
 
         diag_step2 = {
-            "status": r2.status_code,
-            "content_type": ct,
-            "body_len": len(body),
-            "body_preview": body[:300],
+            "status":        r2.status_code,
+            "content_type":  ct,
+            "body_len":      len(body),
+            "body_preview":  body[:500],
         }
 
         if r2.status_code != 200:
-            msg = f"CSV download returned {r2.status_code}. step2={diag_step2}"
+            msg = f"API returned {r2.status_code}. step2={diag_step2}"
             print(f"[UO] {msg}")
             return {"ok": False, "rows": 0, "error": "bad_status", "detail": msg}
 
-        reader = csv.DictReader(StringIO(body))
-        rows   = [{k.strip(): (v or "").strip() for k, v in row.items()}
-                  for row in reader]
-
-        if not rows:
-            msg = f"CSV parsed but 0 rows. step2={diag_step2}"
+        try:
+            payload = r2.json()
+        except Exception:
+            msg = f"Response not JSON. step2={diag_step2}"
             print(f"[UO] {msg}")
-            return {"ok": False, "rows": 0, "error": "empty_csv", "detail": msg}
+            return {"ok": False, "rows": 0, "error": "not_json", "detail": msg}
+
+        # Barchart wraps records in payload["data"][n]["raw"]
+        raw_records = payload.get("data", [])
+        if not raw_records:
+            msg = f"JSON ok but data[] empty. keys={list(payload.keys())} step2={diag_step2}"
+            print(f"[UO] {msg}")
+            return {"ok": False, "rows": 0, "error": "empty_data", "detail": msg}
+
+        rows = []
+        for rec in raw_records:
+            r = rec.get("raw", rec)   # unwrap {"raw": {...}} if present
+            rows.append({
+                "Symbol":           str(r.get("symbol",           "")),
+                "Put/Call":         str(r.get("optionType",       "")),
+                "Strike":           str(r.get("strikePrice",      "")),
+                "Expiration Date":  str(r.get("expiration",       "")),
+                "Volume":           str(r.get("volume",           "")),
+                "Open Interest":    str(r.get("openInterest",     "")),
+                "Vol/OI Ratio":     str(r.get("volOiRatio",       "")),
+                "Bid":              str(r.get("bidPrice",         "")),
+                "Ask":              str(r.get("askPrice",         "")),
+                "Last Price":       str(r.get("lastPrice",        "")),
+                "IV":               str(r.get("impliedVolatility","")),
+                "Time":             str(r.get("tradeTime",        "")),
+            })
 
         _unusual_options["data"]  = rows
         _unusual_options["as_of"] = today
