@@ -480,12 +480,29 @@ async def _scrape_unusual_options() -> dict:
                 "DTE":             str(r.get("daysToExpiration",            "")),
             })
 
+        # Derive as_of from the latest tradeTime in the data (ET date),
+        # so a catch-up scrape on 4/10 morning correctly shows "as of 2025-04-09".
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            max_ts = max(
+                (int(rec.get("raw", rec).get("tradeTime", 0) or 0)
+                 for rec in all_raw[:_TARGET]),
+                default=0,
+            )
+            as_of = (
+                _dt.datetime.fromtimestamp(max_ts, tz=_ZI("America/New_York"))
+                            .strftime("%Y-%m-%d")
+                if max_ts else today
+            )
+        except Exception:
+            as_of = today
+
         _unusual_options["data"]  = rows
-        _unusual_options["as_of"] = today
-        _uo_save_db(today, rows)
-        print(f"[UO] scraped {len(rows)} rows for {today}")
+        _unusual_options["as_of"] = as_of
+        _uo_save_db(as_of, rows)
+        print(f"[UO] scraped {len(rows)} rows for {as_of} (fetched {today})")
         return {"ok": True, "rows": len(rows), "error": None,
-                "detail": f"scraped {len(rows)} rows for {today}"}
+                "detail": f"scraped {len(rows)} rows for {as_of}"}
 
     except Exception as e:
         msg = str(e)
@@ -501,12 +518,17 @@ async def _uo_scheduler() -> None:
     from zoneinfo import ZoneInfo
 
     _uo_load_db()
-    last_date: str | None = _unusual_options.get("as_of")  # skip re-scrape if fresh
+    last_date: str | None = _unusual_options.get("as_of")
 
-    # On first deploy (no DB data yet), scrape immediately so UO works right away
-    if last_date is None:
+    # Scrape on startup if data is missing OR stale (a previous day).
+    # Render free tier sleeps between requests — the scheduler loop dies during
+    # sleep, so the 4:05 PM scrape can be missed.  On the next wake-up we catch
+    # up immediately rather than waiting until 4:05 PM again.
+    et_now    = datetime.now(ZoneInfo("America/New_York"))
+    today_str = et_now.strftime("%Y-%m-%d")
+    if last_date is None or last_date != today_str:
         result = await _scrape_unusual_options()
-        print(f"[UO] startup scrape: {result}")
+        print(f"[UO] startup scrape (prev={last_date}): {result}")
         last_date = _unusual_options.get("as_of")
 
     while True:
@@ -517,8 +539,9 @@ async def _uo_scheduler() -> None:
             if (et.weekday() < 5
                     and (et.hour > 16 or (et.hour == 16 and et.minute >= 5))
                     and last_date != today_str):
-                await _scrape_unusual_options()
-                last_date = today_str
+                result = await _scrape_unusual_options()
+                if result.get("ok"):
+                    last_date = _unusual_options.get("as_of") or today_str
         except Exception as e:
             print(f"[UO] scheduler error: {e}")
         await asyncio.sleep(30)

@@ -143,8 +143,19 @@ def get_candles(ticker, timeframe="1Y"):
     if hist.empty:
         raise ValueError(f"No data returned for '{ticker}'. Check the ticker symbol.")
 
-    closes = [round(float(c), 2) for c in hist["Close"].tolist()]
-    dates  = [d.strftime("%Y-%m-%d") for d in hist.index.to_pydatetime()]
+    import math
+    closes, dates = [], []
+    for c, d in zip(hist["Close"].tolist(), hist.index.to_pydatetime()):
+        try:
+            f = float(c)
+            if not math.isnan(f):
+                closes.append(round(f, 2))
+                dates.append(d.strftime("%Y-%m-%d"))
+        except (TypeError, ValueError):
+            pass
+
+    if not closes:
+        raise ValueError(f"No valid price data returned for '{ticker}'.")
 
     return {
         "symbol":    ticker.upper(),
