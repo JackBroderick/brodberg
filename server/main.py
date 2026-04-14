@@ -1084,6 +1084,20 @@ def update_me(req: UpdateProfileRequest, username: str = Depends(_current_user))
         conn.commit()
     return {"message": "Profile updated."}
 
+
+@app.get("/api/chat/dm-threads")
+def get_dm_threads(username: str = Depends(_current_user)):
+    """Return all DM rooms the logged-in user has participated in."""
+    with _db_conn() as conn:
+        cur = _execute(conn,
+            "SELECT DISTINCT room FROM chat_messages "
+            "WHERE room LIKE 'dm:' || ? || ':%' "
+            "   OR room LIKE 'dm:%:' || ? "
+            "ORDER BY room",
+            (username, username))
+        rows = cur.fetchall()
+    return {"rooms": [row["room"] for row in rows]}
+
 # ---------------------------------------------------------------------------
 # Market data proxy routes
 # Finnhub API key is injected server-side — clients send none.

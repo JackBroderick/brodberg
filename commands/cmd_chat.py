@@ -83,12 +83,18 @@ def fetch(parts: list) -> dict:
     rooms  = ["general"]
     active = 0
 
+    # Auto-load all existing DM threads
+    for dm in chat_data.fetch_dm_threads():
+        if dm not in rooms:
+            rooms.append(dm)
+
     if len(parts) > 1:
         target = parts[1].lower()
         if target != me.lower():
             dm = _dm_room(me, target)
-            rooms.append(dm)
-            active = 1
+            if dm not in rooms:
+                rooms.append(dm)
+            active = rooms.index(dm)
 
     chat_data.connect(initial_rooms=list(rooms))
 

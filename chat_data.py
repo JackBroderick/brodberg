@@ -109,6 +109,21 @@ def join_room(room: str) -> None:
     send({"type": "join", "room": room})
 
 
+def fetch_dm_threads() -> list:
+    """HTTP fetch of all DM rooms the current user has participated in."""
+    import requests
+    token = brodberg_session.get_token()
+    if not token:
+        return []
+    try:
+        url = f"{brodberg_session.get_server_url()}/api/chat/dm-threads"
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        r.raise_for_status()
+        return r.json().get("rooms", [])
+    except Exception:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Async internals
 # ---------------------------------------------------------------------------
@@ -266,6 +281,10 @@ def connect(initial_rooms: list | None = None) -> None:
     # Reuse existing connection only if it's the same user
     if _thread and _thread.is_alive():
         if _connected_user == me:
+            # Still join any rooms not yet seen (e.g. newly discovered DMs)
+            if initial_rooms:
+                for room in initial_rooms:
+                    join_room(room)
             return
         # Different user — tear down the old session first
         disconnect()
