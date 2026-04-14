@@ -7,12 +7,20 @@ Maintains a persistent connection to wss://.../api/chat and stores
 received messages in a per-room list.  The curses render loop reads
 from these lists via get_messages(); messages are sent via send().
 
+Send mechanism
+--------------
+Instead of asyncio.run_coroutine_threadsafe (which can silently drop
+messages if the loop is blocked), we use an asyncio.Queue bridged with
+loop.call_soon_threadsafe.  A dedicated sender task inside the event
+loop drains the queue and calls ws.send() — keeping all WebSocket I/O
+inside the event loop thread.
+
 Public API
 ----------
   connect(initial_rooms)  — start the WS thread (idempotent)
   disconnect()            — stop the WS thread
-  send(payload)           — send a JSON message to the server
-  join_room(room)         — request history for a room (send join)
+  send(payload)           — enqueue a JSON payload to send
+  join_room(room)         — request history for a room
   get_messages(room)      — return a snapshot list for a room
   get_status()            — "idle" | "connecting" | "live" | "error: ..."
 
@@ -36,6 +44,8 @@ _messages: dict[str, list] = {}   # room -> [{"from": str, "text": str, "ts": st
 _messages_lock = threading.Lock()
 
 HISTORY_LIMIT = 200   # max messages kept in memory per room
+
+_STOP_SENTINEL = object()   # signals the sender task to exit
 
 
 def _append(room: str, entry: dict) -> None:
@@ -77,26 +87,30 @@ def get_status() -> str:
 
 
 # ---------------------------------------------------------------------------
-# WebSocket thread internals
+# Outbound queue
+# Populated from the main (curses) thread via send().
+# Drained by the _sender task inside the event loop.
 # ---------------------------------------------------------------------------
 
-_loop:   asyncio.AbstractEventLoop | None = None
-_ws_ref                                   = None   # websockets.ClientConnection
-_thread: threading.Thread | None          = None
-_stop:   threading.Event                  = threading.Event()
+_send_queue: asyncio.Queue | None = None
+_loop:  asyncio.AbstractEventLoop | None = None
+_thread: threading.Thread | None = None
+_stop:   threading.Event = threading.Event()
 
 
 def send(payload: dict) -> None:
-    """Send a JSON payload to the server.  No-op if not connected."""
-    global _loop, _ws_ref
-    if _loop and _ws_ref:
-        asyncio.run_coroutine_threadsafe(_ws_ref.send(json.dumps(payload)), _loop)
+    """Enqueue a payload for sending.  Thread-safe; call from any thread."""
+    global _loop, _send_queue
+    if _loop and _send_queue:
+        # call_soon_threadsafe schedules put_nowait on the event-loop thread —
+        # 100 % safe because asyncio.Queue is not thread-safe, but put_nowait
+        # is a plain sync call and call_soon_threadsafe serialises it properly.
+        _loop.call_soon_threadsafe(_send_queue.put_nowait, payload)
     else:
-        # Connection not ready — surface this as a visible system message
         room = payload.get("room", "general")
         _append(room, {
             "from": "system",
-            "text": f"[debug] send skipped — loop={bool(_loop)} ws={bool(_ws_ref)}",
+            "text": f"[debug] send skipped — loop={bool(_loop)} queue={bool(_send_queue)}",
             "ts":   "",
         })
 
@@ -106,11 +120,23 @@ def join_room(room: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Async WS runner
+# Async internals
 # ---------------------------------------------------------------------------
 
+async def _sender(ws, q: asyncio.Queue) -> None:
+    """Drain the outbound queue and write each payload to the WebSocket."""
+    while True:
+        item = await q.get()
+        if item is _STOP_SENTINEL:
+            break
+        try:
+            await ws.send(json.dumps(item))
+        except Exception:
+            break   # connection lost — let the receiver detect and exit
+
+
 async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> None:
-    global _ws_ref
+    global _send_queue
 
     try:
         import websockets
@@ -127,7 +153,6 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
 
     try:
         async with websockets.connect(uri, ping_interval=20) as ws:
-            _ws_ref = ws
 
             # ── Auth ──────────────────────────────────────────────────────
             await ws.send(json.dumps({"type": "auth", "token": token}))
@@ -138,48 +163,57 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
 
             _set_status("live")
 
+            # ── Create outbound queue and start sender task ────────────────
+            _send_queue = asyncio.Queue()
+            sender_task = asyncio.create_task(_sender(ws, _send_queue))
+
             # ── Join initial rooms ─────────────────────────────────────────
             for room in initial_rooms:
                 await ws.send(json.dumps({"type": "join", "room": room}))
 
             # ── Receive loop ──────────────────────────────────────────────
-            async for raw in ws:
-                if stop_event.is_set():
-                    break
+            try:
+                async for raw in ws:
+                    if stop_event.is_set():
+                        break
 
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
 
-                mtype = msg.get("type")
+                    mtype = msg.get("type")
 
-                if mtype == "history":
-                    room  = msg.get("room", "general")
-                    msgs  = msg.get("messages", [])
-                    with _messages_lock:
-                        _messages[room] = msgs[-HISTORY_LIMIT:]
+                    if mtype == "history":
+                        room = msg.get("room", "general")
+                        msgs = msg.get("messages", [])
+                        with _messages_lock:
+                            _messages[room] = msgs[-HISTORY_LIMIT:]
 
-                elif mtype in ("message", "dm"):
-                    room = msg.get("room", "general")
-                    _append(room, {
-                        "from": msg.get("from", "?"),
-                        "text": msg.get("text", ""),
-                        "ts":   msg.get("ts",   ""),
-                    })
+                    elif mtype in ("message", "dm"):
+                        room = msg.get("room", "general")
+                        _append(room, {
+                            "from": msg.get("from", "?"),
+                            "text": msg.get("text", ""),
+                            "ts":   msg.get("ts",   ""),
+                        })
 
-                elif mtype == "error":
-                    # Surface server errors as a system message in general
-                    _append("general", {
-                        "from": "system",
-                        "text": f"[error] {msg.get('text', '')}",
-                        "ts":   "",
-                    })
+                    elif mtype == "error":
+                        _append("general", {
+                            "from": "system",
+                            "text": f"[error] {msg.get('text', '')}",
+                            "ts":   "",
+                        })
+
+            finally:
+                # Stop the sender task cleanly
+                _send_queue.put_nowait(_STOP_SENTINEL)
+                await sender_task
 
     except Exception as exc:
         _set_status(f"error: {exc}")
     finally:
-        _ws_ref = None
+        _send_queue = None
 
 
 # ---------------------------------------------------------------------------
@@ -195,19 +229,18 @@ def connect(initial_rooms: list | None = None) -> None:
         _set_status("error: not logged in")
         return
 
-    # Already running
     if _thread and _thread.is_alive():
-        return
+        return   # already running
 
     if initial_rooms is None:
         initial_rooms = ["general"]
 
-    _stop  = threading.Event()
-    _loop  = asyncio.new_event_loop()
+    _stop = threading.Event()
+    _loop = asyncio.new_event_loop()
 
     def _thread_main():
         asyncio.set_event_loop(_loop)
-        _loop.run_until_complete(_run(token, initial_rooms, _stop))
+        _loop.run_until_complete(_run(token, list(initial_rooms), _stop))
 
     _thread = threading.Thread(target=_thread_main, daemon=True, name="chat-ws")
     _thread.start()
@@ -216,8 +249,8 @@ def connect(initial_rooms: list | None = None) -> None:
 def disconnect() -> None:
     global _loop, _thread
     _stop.set()
-    if _loop:
-        _loop.call_soon_threadsafe(_loop.stop)
+    if _loop and _send_queue:
+        _loop.call_soon_threadsafe(_send_queue.put_nowait, _STOP_SENTINEL)
     _thread = None
     _loop   = None
     _set_status("idle")
