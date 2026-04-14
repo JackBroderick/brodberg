@@ -91,6 +91,14 @@ def send(payload: dict) -> None:
     global _loop, _ws_ref
     if _loop and _ws_ref:
         asyncio.run_coroutine_threadsafe(_ws_ref.send(json.dumps(payload)), _loop)
+    else:
+        # Connection not ready — surface this as a visible system message
+        room = payload.get("room", "general")
+        _append(room, {
+            "from": "system",
+            "text": f"[debug] send skipped — loop={bool(_loop)} ws={bool(_ws_ref)}",
+            "ts":   "",
+        })
 
 
 def join_room(room: str) -> None:
