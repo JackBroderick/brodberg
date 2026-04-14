@@ -882,15 +882,26 @@ def _chat_save(room: str, from_user: str, text: str, ts: str) -> int | None:
         return None
 
 
+def _get_admin_usernames() -> set:
+    try:
+        with _db_conn() as conn:
+            cur = _execute(conn, "SELECT username FROM users WHERE is_admin = TRUE")
+            return {r["username"] for r in cur.fetchall()}
+    except Exception:
+        return set()
+
+
 def _chat_history(room: str, limit: int = 80) -> list:
     try:
+        admins = _get_admin_usernames()
         with _db_conn() as conn:
             cur = _execute(conn,
                 "SELECT id, from_user, text, ts FROM chat_messages "
                 "WHERE room = ? ORDER BY id DESC LIMIT ?",
                 (room, limit))
             rows = cur.fetchall()
-        return [{"id": r["id"], "from": r["from_user"], "text": r["text"], "ts": r["ts"]}
+        return [{"id": r["id"], "from": r["from_user"], "text": r["text"], "ts": r["ts"],
+                 "admin": r["from_user"] in admins}
                 for r in reversed(rows)]
     except Exception as e:
         print(f"[CHAT] db history error: {e}")
@@ -1460,7 +1471,7 @@ async def chat_ws(ws: WebSocket):
                     {"type": "history", "room": room, "messages": history}))
 
             elif mtype == "message":
-                _, is_muted, _ = _get_user_flags(username)
+                is_admin, is_muted, _ = _get_user_flags(username)
                 if is_muted:
                     await ws.send_text(json.dumps({"type": "error", "text": "You are muted"}))
                     continue
@@ -1472,10 +1483,10 @@ async def chat_ws(ws: WebSocket):
                 msg_id = _chat_save(room, username, text, ts)
                 await _chat.broadcast(
                     {"type": "message", "room": room, "id": msg_id,
-                     "from": username, "text": text, "ts": ts})
+                     "from": username, "text": text, "ts": ts, "admin": is_admin})
 
             elif mtype == "dm":
-                _, is_muted, _ = _get_user_flags(username)
+                is_admin, is_muted, _ = _get_user_flags(username)
                 if is_muted:
                     await ws.send_text(json.dumps({"type": "error", "text": "You are muted"}))
                     continue
@@ -1496,7 +1507,7 @@ async def chat_ws(ws: WebSocket):
                 ts      = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 msg_id  = _chat_save(room, username, text, ts)
                 payload = {"type": "dm", "room": room, "id": msg_id,
-                           "from": username, "to": to, "text": text, "ts": ts}
+                           "from": username, "to": to, "text": text, "ts": ts, "admin": is_admin}
                 await _chat.send_to(username, payload)
                 if to != username:
                     await _chat.send_to(to, payload)

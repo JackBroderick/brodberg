@@ -280,12 +280,18 @@ def render(stdscr, cache: dict, colors: dict) -> None:
             _put(stdscr, row, 0, (indent + text)[:width - 1], colors["dim"])
             continue
 
-        ts_str   = _fmt_ts(ts)
-        name_str = sender[:name_w].rjust(name_w)
+        is_admin_sender = msg.get("admin", False)
+        ts_str = _fmt_ts(ts)
+
+        # Admin gets a star marker; truncate name to keep total width = name_w
+        if is_admin_sender:
+            name_str = sender[:(name_w - 2)].rjust(name_w - 2) + " ★"
+        else:
+            name_str = sender[:name_w].rjust(name_w)
 
         _put(stdscr, row, 2, ts_str, colors["dim"])
-        name_color = colors["orange"] if is_me else colors["dim"]
-        _put(stdscr, row, 9, name_str + ":", name_color, bold=is_me)
+        name_color = colors["orange"] if (is_me or is_admin_sender) else colors["dim"]
+        _put(stdscr, row, 9, name_str + ":", name_color, bold=(is_me or is_admin_sender))
 
         max_text = max(0, width - text_col - 1)
         _put(stdscr, row, text_col, text[:max_text],

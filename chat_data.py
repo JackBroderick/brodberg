@@ -183,10 +183,11 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
                         elif mtype in ("message", "dm"):
                             room = msg.get("room", "general")
                             _append(room, {
-                                "id":   msg.get("id"),
-                                "from": msg.get("from", "?"),
-                                "text": msg.get("text", ""),
-                                "ts":   msg.get("ts",   ""),
+                                "id":    msg.get("id"),
+                                "from":  msg.get("from", "?"),
+                                "text":  msg.get("text", ""),
+                                "ts":    msg.get("ts",   ""),
+                                "admin": msg.get("admin", False),
                             })
 
                         elif mtype == "message_deleted":
