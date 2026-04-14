@@ -31,10 +31,26 @@ Room name conventions
 """
 
 import json
+import os
 import threading
 import asyncio
+import time
 
 import brodberg_session
+
+# ---------------------------------------------------------------------------
+# Debug log  — writes to ~/brodberg_chat.log so we can trace without curses
+# ---------------------------------------------------------------------------
+
+_LOG = os.path.expanduser("~/brodberg_chat.log")
+
+
+def _dbg(msg: str) -> None:
+    try:
+        with open(_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')}  {msg}\n")
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Per-room message store
@@ -101,13 +117,13 @@ _stop:   threading.Event = threading.Event()
 def send(payload: dict) -> None:
     """Enqueue a payload for sending.  Thread-safe; call from any thread."""
     global _loop, _send_queue
+    _dbg(f"send() called: loop={bool(_loop)} queue={bool(_send_queue)} payload={payload}")
     if _loop and _send_queue:
-        # call_soon_threadsafe schedules put_nowait on the event-loop thread —
-        # 100 % safe because asyncio.Queue is not thread-safe, but put_nowait
-        # is a plain sync call and call_soon_threadsafe serialises it properly.
         _loop.call_soon_threadsafe(_send_queue.put_nowait, payload)
+        _dbg("send() → call_soon_threadsafe queued")
     else:
         room = payload.get("room", "general")
+        _dbg(f"send() SKIPPED — loop={bool(_loop)} queue={bool(_send_queue)}")
         _append(room, {
             "from": "system",
             "text": f"[debug] send skipped — loop={bool(_loop)} queue={bool(_send_queue)}",
@@ -125,13 +141,18 @@ def join_room(room: str) -> None:
 
 async def _sender(ws, q: asyncio.Queue) -> None:
     """Drain the outbound queue and write each payload to the WebSocket."""
+    _dbg("_sender task started")
     while True:
         item = await q.get()
         if item is _STOP_SENTINEL:
+            _dbg("_sender received STOP sentinel — exiting")
             break
+        _dbg(f"_sender dequeued item: {item}")
         try:
             await ws.send(json.dumps(item))
-        except Exception:
+            _dbg("_sender ws.send() completed OK")
+        except Exception as exc:
+            _dbg(f"_sender ws.send() RAISED: {exc}")
             break   # connection lost — let the receiver detect and exit
 
 
@@ -149,6 +170,7 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
            .replace("https://", "wss://")
            .replace("http://",  "ws://")) + "/api/chat"
 
+    _dbg(f"_run() connecting to {uri}")
     _set_status("connecting")
 
     try:
@@ -157,11 +179,13 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
             # ── Auth ──────────────────────────────────────────────────────
             await ws.send(json.dumps({"type": "auth", "token": token}))
             resp = json.loads(await ws.recv())
+            _dbg(f"_run() auth response: {resp}")
             if resp.get("type") == "error":
                 _set_status(f"error: {resp.get('text', 'auth failed')}")
                 return
 
             _set_status("live")
+            _dbg("_run() status=live, creating send queue + sender task")
 
             # ── Create outbound queue and start sender task ────────────────
             _send_queue = asyncio.Queue()

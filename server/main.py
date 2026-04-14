@@ -1346,7 +1346,7 @@ async def chat_ws(ws: WebSocket):
         await ws.send_text(json.dumps({"type": "ready", "username": username}))
 
         # ── Message loop ──────────────────────────────────────────────────
-        async for raw in ws:
+        async for raw in ws.iter_text():
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
