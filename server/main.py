@@ -1373,12 +1373,10 @@ async def chat_ws(ws: WebSocket):
                 if not text:
                     continue
                 ts = datetime.now(timezone.utc).strftime("%H:%M")
-                print(f"[CHAT] {username} -> {room}: {text[:60]}", flush=True)
                 _chat_save(room, username, text, ts)
                 await _chat.broadcast(
                     {"type": "message", "room": room,
                      "from": username, "text": text, "ts": ts})
-                print(f"[CHAT] broadcast sent to {len(_chat._conns)} connection(s)", flush=True)
 
             elif mtype == "dm":
                 to   = msg.get("to", "").strip().lower()
