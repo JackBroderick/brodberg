@@ -8,7 +8,7 @@ and renders one section at a time with a navigable tab bar.
 
   fetch(parts)                  -> cache dict
   render(stdscr, cache, colors) -> None
-  on_keypress(key, cache)       -> cache dict   ← ← → cycle sections
+  on_keypress(key, cache)       -> cache dict   ← → cycle sections  ↑ ↓ scroll
 """
 
 import curses
@@ -77,7 +77,7 @@ def fetch(parts: list) -> dict:
     if not sections:
         return {"sections": [], "active": 0, "error": "Help file contains no sections."}
 
-    return {"sections": sections, "active": 0, "error": None}
+    return {"sections": sections, "active": 0, "scroll": 0, "error": None}
 
 
 # ---------------------------------------------------------------------------
@@ -90,12 +90,18 @@ def on_keypress(key: int, cache: dict) -> dict:
         return cache
 
     active = cache.get("active", 0)
+    scroll = cache.get("scroll", 0)
     n      = len(sections)
 
     if key == curses.KEY_RIGHT:
-        return {**cache, "active": (active + 1) % n}
+        return {**cache, "active": (active + 1) % n, "scroll": 0}
     if key == curses.KEY_LEFT:
-        return {**cache, "active": (active - 1) % n}
+        return {**cache, "active": (active - 1) % n, "scroll": 0}
+    if key == curses.KEY_DOWN:
+        max_scroll = max(0, len(sections[active]["lines"]) - 1)
+        return {**cache, "scroll": min(scroll + 1, max_scroll)}
+    if key == curses.KEY_UP:
+        return {**cache, "scroll": max(0, scroll - 1)}
 
     return cache
 
@@ -115,7 +121,7 @@ def _put(stdscr, row, col, text, color, bold=False):
 
 
 def render(stdscr, cache: dict, colors: dict) -> None:
-    _, width = stdscr.getmaxyx()
+    height, width = stdscr.getmaxyx()
 
     error = cache.get("error")
     if error:
@@ -150,8 +156,24 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     r += 2
 
     # ── Section content ───────────────────────────────────────────────────
-    for line in sections[active]["lines"]:
-        if r >= width - 1:
-            break
+    lines        = sections[active]["lines"]
+    content_top  = r
+    # Reserve 1 row at the bottom for the scroll indicator when needed
+    available    = height - content_top - 2
+    total        = len(lines)
+
+    # Clamp scroll so we never scroll past the last page
+    scroll = cache.get("scroll", 0)
+    max_scroll = max(0, total - available)
+    scroll = min(scroll, max_scroll)
+
+    visible = lines[scroll:scroll + available]
+    for line in visible:
         _put(stdscr, r, 0, line, colors["orange"])
         r += 1
+
+    # ── Scroll indicator ─────────────────────────────────────────────────
+    if total > available:
+        end   = min(scroll + available, total)
+        label = f"  ↑ ↓   {scroll + 1}–{end} / {total} lines"
+        _put(stdscr, height - 2, 2, label, colors["dim"])

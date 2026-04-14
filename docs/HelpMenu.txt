@@ -1,6 +1,6 @@
 ## General
 
-  HELP               - Browse command reference  (← → to switch category)
+  HELP               - Browse command reference  (← → switch category  ↑ ↓ scroll)
   CL                 - Version change log
   CLEAR              - Clear the active pane
   EXIT               - Close the terminal
@@ -70,6 +70,13 @@
 
   N <Ticker>         - Company-specific news  e.g. N AAPL
                        ↑ ↓  navigate   Enter  expand / collapse article
+
+## Chat
+
+  CHAT               - General chat room  (login required)
+                       Tab  switch room   ↑ ↓  scroll   Enter  send   ` exit
+
+  CHAT <username>    - Open a direct message with that user
 
 ## Account
 

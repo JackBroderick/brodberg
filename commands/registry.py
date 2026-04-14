@@ -65,6 +65,7 @@ from commands import cmd_sent
 from commands import cmd_uo
 from commands import cmd_earn
 from commands import cmd_omon
+from commands import cmd_chat
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -214,6 +215,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_earn.fetch,
         "render":      cmd_earn.render,
         "on_keypress": cmd_earn.on_keypress,
+    },
+    # ── Chat ──────────────────────────────────────────────────────────────
+    {
+        "prefix":      "CHAT",
+        "exact":       False,
+        "fetch":       cmd_chat.fetch,
+        "render":      cmd_chat.render,
+        "on_keypress": cmd_chat.on_keypress,
     },
 ]
 

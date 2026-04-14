@@ -270,6 +270,29 @@ def _init_db() -> None:
                 fetched_at TEXT NOT NULL
             )
         """)
+        # Chat messages
+        if _DATABASE_URL:
+            _execute(conn, """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id        SERIAL PRIMARY KEY,
+                    room      TEXT NOT NULL,
+                    from_user TEXT NOT NULL,
+                    text      TEXT NOT NULL,
+                    ts        TEXT NOT NULL
+                )
+            """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages (room, id)")
+        else:
+            _execute(conn, """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room      TEXT NOT NULL,
+                    from_user TEXT NOT NULL,
+                    text      TEXT NOT NULL,
+                    ts        TEXT NOT NULL
+                )
+            """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages (room, id)")
         conn.commit()
 
 
@@ -753,6 +776,93 @@ def _verify_token(token: str) -> str:
     return data["sub"]
 
 # ---------------------------------------------------------------------------
+# Token verification for WebSocket handlers
+# (raises ValueError instead of HTTPException — safe inside async WS context)
+# ---------------------------------------------------------------------------
+
+def _verify_token_ws(token: str) -> str:
+    try:
+        header, payload_b64, sig = token.split(".")
+    except ValueError:
+        raise ValueError("Malformed token")
+    expected = _b64url(hmac.new(SECRET_KEY.encode(), f"{header}.{payload_b64}".encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(expected, sig):
+        raise ValueError("Invalid token")
+    data = json.loads(_b64url_decode(payload_b64))
+    if data.get("exp", 0) < time.time():
+        raise ValueError("Token expired")
+    return data["sub"]
+
+
+# ---------------------------------------------------------------------------
+# Chat — connection manager + DB helpers
+# ---------------------------------------------------------------------------
+
+class _ChatManager:
+    """Tracks live WebSocket connections for the chat endpoint."""
+
+    def __init__(self):
+        self._conns: dict[str, "WebSocket"] = {}   # username -> ws
+
+    def connect(self, username: str, ws) -> None:
+        self._conns[username] = ws
+
+    def disconnect(self, username: str) -> None:
+        self._conns.pop(username, None)
+
+    async def send_to(self, username: str, payload: dict) -> None:
+        ws = self._conns.get(username)
+        if ws:
+            try:
+                await ws.send_text(json.dumps(payload))
+            except Exception:
+                self.disconnect(username)
+
+    async def broadcast(self, payload: dict) -> None:
+        """Send to every connected user (used for #general messages)."""
+        dead = []
+        for uname, ws in list(self._conns.items()):
+            try:
+                await ws.send_text(json.dumps(payload))
+            except Exception:
+                dead.append(uname)
+        for u in dead:
+            self.disconnect(u)
+
+    def online(self) -> list:
+        return list(self._conns.keys())
+
+
+_chat = _ChatManager()
+
+
+def _chat_save(room: str, from_user: str, text: str, ts: str) -> None:
+    try:
+        with _db_conn() as conn:
+            _execute(conn,
+                "INSERT INTO chat_messages (room, from_user, text, ts) VALUES (?, ?, ?, ?)",
+                (room, from_user, text, ts))
+            conn.commit()
+    except Exception as e:
+        print(f"[CHAT] db save error: {e}")
+
+
+def _chat_history(room: str, limit: int = 80) -> list:
+    try:
+        with _db_conn() as conn:
+            cur = _execute(conn,
+                "SELECT from_user, text, ts FROM chat_messages "
+                "WHERE room = ? ORDER BY id DESC LIMIT ?",
+                (room, limit))
+            rows = cur.fetchall()
+        return [{"from": r["from_user"], "text": r["text"], "ts": r["ts"]}
+                for r in reversed(rows)]
+    except Exception as e:
+        print(f"[CHAT] db history error: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # FastAPI app — lifespan manages shared client and connection pool
 # ---------------------------------------------------------------------------
 
@@ -1199,3 +1309,102 @@ async def ship_ws_proxy(ws: WebSocket):
         pass
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Chat WebSocket endpoint
+# Protocol:
+#   Client → {"type": "auth",    "token": "..."}
+#   Server ← {"type": "ready",   "username": "..."}
+#   Client → {"type": "join",    "room": "general"}
+#   Server ← {"type": "history", "room": "...", "messages": [...]}
+#   Client → {"type": "message", "room": "general", "text": "..."}
+#   Server ← {"type": "message", "room": "...", "from": "...", "text": "...", "ts": "HH:MM"}
+#   Client → {"type": "dm",      "to": "bob", "text": "..."}
+#   Server ← {"type": "dm",      "room": "dm:alice:bob", "from": "...", "to": "...",
+#              "text": "...", "ts": "HH:MM"}   (sent to both parties if online)
+# ---------------------------------------------------------------------------
+
+@app.websocket("/api/chat")
+async def chat_ws(ws: WebSocket):
+    await ws.accept()
+    username = None
+    try:
+        # ── Auth handshake ────────────────────────────────────────────────
+        raw = await asyncio.wait_for(ws.receive_text(), timeout=10.0)
+        auth = json.loads(raw)
+        if auth.get("type") != "auth":
+            await ws.send_text(json.dumps({"type": "error", "text": "Expected auth message"}))
+            return
+        try:
+            username = _verify_token_ws(auth.get("token", ""))
+        except ValueError as exc:
+            await ws.send_text(json.dumps({"type": "error", "text": str(exc)}))
+            return
+
+        _chat.connect(username, ws)
+        await ws.send_text(json.dumps({"type": "ready", "username": username}))
+
+        # ── Message loop ──────────────────────────────────────────────────
+        async for raw in ws:
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            mtype = msg.get("type")
+
+            if mtype == "join":
+                room = msg.get("room", "general")
+                # DM rooms: validate the requesting user is a participant
+                if room.startswith("dm:"):
+                    parts = room[3:].split(":")
+                    if username not in parts:
+                        await ws.send_text(json.dumps(
+                            {"type": "error", "text": "Not a participant in this DM"}))
+                        continue
+                history = _chat_history(room)
+                await ws.send_text(json.dumps(
+                    {"type": "history", "room": room, "messages": history}))
+
+            elif mtype == "message":
+                room = msg.get("room", "general")
+                text = msg.get("text", "").strip()[:500]
+                if not text:
+                    continue
+                ts = datetime.now(timezone.utc).strftime("%H:%M")
+                _chat_save(room, username, text, ts)
+                await _chat.broadcast(
+                    {"type": "message", "room": room,
+                     "from": username, "text": text, "ts": ts})
+
+            elif mtype == "dm":
+                to   = msg.get("to", "").strip().lower()
+                text = msg.get("text", "").strip()[:500]
+                if not text or not to:
+                    continue
+                # Verify recipient exists
+                with _db_conn() as conn:
+                    cur = _execute(conn,
+                        "SELECT username FROM users WHERE username = ?", (to,))
+                    row = cur.fetchone()
+                if not row:
+                    await ws.send_text(json.dumps(
+                        {"type": "error", "text": f"User '{to}' not found"}))
+                    continue
+                room    = "dm:" + ":".join(sorted([username, to]))
+                ts      = datetime.now(timezone.utc).strftime("%H:%M")
+                payload = {"type": "dm", "room": room,
+                           "from": username, "to": to, "text": text, "ts": ts}
+                _chat_save(room, username, text, ts)
+                await _chat.send_to(username, payload)
+                if to != username:
+                    await _chat.send_to(to, payload)
+
+    except (WebSocketDisconnect, asyncio.TimeoutError):
+        pass
+    except Exception:
+        pass
+    finally:
+        if username:
+            _chat.disconnect(username)
