@@ -183,9 +183,39 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
                         elif mtype in ("message", "dm"):
                             room = msg.get("room", "general")
                             _append(room, {
+                                "id":   msg.get("id"),
                                 "from": msg.get("from", "?"),
                                 "text": msg.get("text", ""),
                                 "ts":   msg.get("ts",   ""),
+                            })
+
+                        elif mtype == "message_deleted":
+                            room   = msg.get("room", "general")
+                            msg_id = msg.get("msg_id")
+                            if msg_id is not None:
+                                with _messages_lock:
+                                    if room in _messages:
+                                        _messages[room] = [
+                                            m for m in _messages[room]
+                                            if m.get("id") != msg_id
+                                        ]
+
+                        elif mtype == "kicked":
+                            reason = msg.get("reason", "kicked")
+                            _append("general", {
+                                "from": "system",
+                                "text": f"[{reason}]",
+                                "ts":   "",
+                            })
+                            _set_status(f"error: {reason}")
+                            return   # stop receiving
+
+                        elif mtype == "system":
+                            room = msg.get("room", "general")
+                            _append(room, {
+                                "from": "system",
+                                "text": msg.get("text", ""),
+                                "ts":   "",
                             })
 
                         elif mtype == "error":

@@ -293,6 +293,21 @@ def _init_db() -> None:
                 )
             """)
             _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages (room, id)")
+
+        # Migrations — add admin/moderation columns if they don't exist yet
+        for col in ("is_admin", "is_muted", "is_banned"):
+            try:
+                if _DATABASE_URL:
+                    _execute(conn, f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} BOOLEAN DEFAULT FALSE")
+                else:
+                    _execute(conn, f"ALTER TABLE users ADD COLUMN {col} BOOLEAN DEFAULT FALSE")
+            except Exception:
+                pass  # column already exists (SQLite raises on duplicate)
+
+        # Bootstrap: grant admin to the owner account
+        _execute(conn,
+            "UPDATE users SET is_admin = TRUE WHERE username = 'jackbroderick'")
+
         conn.commit()
 
 
@@ -832,34 +847,105 @@ class _ChatManager:
     def online(self) -> list:
         return list(self._conns.keys())
 
+    async def kick(self, username: str, reason: str = "kicked by admin") -> None:
+        ws = self._conns.get(username)
+        if ws:
+            try:
+                await ws.send_text(json.dumps({"type": "kicked", "reason": reason}))
+                await ws.close()
+            except Exception:
+                pass
+            self.disconnect(username)
+
+    async def broadcast_room(self, room: str, payload: dict) -> None:
+        """Broadcast to relevant users: all for general, participants for DMs."""
+        if room == "general":
+            await self.broadcast(payload)
+        elif room.startswith("dm:"):
+            for user in room[3:].split(":"):
+                await self.send_to(user, payload)
+
 
 _chat = _ChatManager()
 
 
-def _chat_save(room: str, from_user: str, text: str, ts: str) -> None:
+def _chat_save(room: str, from_user: str, text: str, ts: str) -> int | None:
     try:
         with _db_conn() as conn:
-            _execute(conn,
+            cur = _execute(conn,
                 "INSERT INTO chat_messages (room, from_user, text, ts) VALUES (?, ?, ?, ?)",
                 (room, from_user, text, ts))
             conn.commit()
+            return cur.lastrowid
     except Exception as e:
         print(f"[CHAT] db save error: {e}")
+        return None
 
 
 def _chat_history(room: str, limit: int = 80) -> list:
     try:
         with _db_conn() as conn:
             cur = _execute(conn,
-                "SELECT from_user, text, ts FROM chat_messages "
+                "SELECT id, from_user, text, ts FROM chat_messages "
                 "WHERE room = ? ORDER BY id DESC LIMIT ?",
                 (room, limit))
             rows = cur.fetchall()
-        return [{"from": r["from_user"], "text": r["text"], "ts": r["ts"]}
+        return [{"id": r["id"], "from": r["from_user"], "text": r["text"], "ts": r["ts"]}
                 for r in reversed(rows)]
     except Exception as e:
         print(f"[CHAT] db history error: {e}")
         return []
+
+
+def _chat_delete_last(room: str, from_user: str | None = None) -> int | None:
+    """Delete the most recent message in room (optionally filtered to from_user). Returns deleted id."""
+    try:
+        with _db_conn() as conn:
+            if from_user:
+                cur = _execute(conn,
+                    "SELECT id FROM chat_messages WHERE room = ? AND from_user = ? ORDER BY id DESC LIMIT 1",
+                    (room, from_user))
+            else:
+                cur = _execute(conn,
+                    "SELECT id FROM chat_messages WHERE room = ? ORDER BY id DESC LIMIT 1",
+                    (room,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            msg_id = row["id"]
+            _execute(conn, "DELETE FROM chat_messages WHERE id = ?", (msg_id,))
+            conn.commit()
+            return msg_id
+    except Exception as e:
+        print(f"[CHAT] db delete error: {e}")
+        return None
+
+
+def _get_user_flags(username: str) -> tuple:
+    """Returns (is_admin, is_muted, is_banned) for a user."""
+    try:
+        with _db_conn() as conn:
+            cur = _execute(conn,
+                "SELECT is_admin, is_muted, is_banned FROM users WHERE username = ?",
+                (username,))
+            row = cur.fetchone()
+        if row:
+            return bool(row["is_admin"]), bool(row["is_muted"]), bool(row["is_banned"])
+    except Exception as e:
+        print(f"[CHAT] get_user_flags error: {e}")
+    return False, False, False
+
+
+def _set_user_flag(username: str, flag: str, value: bool) -> None:
+    allowed = {"is_admin", "is_muted", "is_banned"}
+    if flag not in allowed:
+        return
+    try:
+        with _db_conn() as conn:
+            _execute(conn, f"UPDATE users SET {flag} = ? WHERE username = ?", (value, username))
+            conn.commit()
+    except Exception as e:
+        print(f"[CHAT] set_user_flag error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1342,6 +1428,12 @@ async def chat_ws(ws: WebSocket):
             await ws.send_text(json.dumps({"type": "error", "text": str(exc)}))
             return
 
+        # Ban check — reject banned users immediately
+        _, _, is_banned = _get_user_flags(username)
+        if is_banned:
+            await ws.send_text(json.dumps({"type": "error", "text": "You are banned from chat"}))
+            return
+
         _chat.connect(username, ws)
         await ws.send_text(json.dumps({"type": "ready", "username": username}))
 
@@ -1368,17 +1460,25 @@ async def chat_ws(ws: WebSocket):
                     {"type": "history", "room": room, "messages": history}))
 
             elif mtype == "message":
+                _, is_muted, _ = _get_user_flags(username)
+                if is_muted:
+                    await ws.send_text(json.dumps({"type": "error", "text": "You are muted"}))
+                    continue
                 room = msg.get("room", "general")
                 text = msg.get("text", "").strip()[:500]
                 if not text:
                     continue
-                ts = datetime.now(timezone.utc).strftime("%H:%M")
-                _chat_save(room, username, text, ts)
+                ts     = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                msg_id = _chat_save(room, username, text, ts)
                 await _chat.broadcast(
-                    {"type": "message", "room": room,
+                    {"type": "message", "room": room, "id": msg_id,
                      "from": username, "text": text, "ts": ts})
 
             elif mtype == "dm":
+                _, is_muted, _ = _get_user_flags(username)
+                if is_muted:
+                    await ws.send_text(json.dumps({"type": "error", "text": "You are muted"}))
+                    continue
                 to   = msg.get("to", "").strip().lower()
                 text = msg.get("text", "").strip()[:500]
                 if not text or not to:
@@ -1393,13 +1493,52 @@ async def chat_ws(ws: WebSocket):
                         {"type": "error", "text": f"User '{to}' not found"}))
                     continue
                 room    = "dm:" + ":".join(sorted([username, to]))
-                ts      = datetime.now(timezone.utc).strftime("%H:%M")
-                payload = {"type": "dm", "room": room,
+                ts      = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                msg_id  = _chat_save(room, username, text, ts)
+                payload = {"type": "dm", "room": room, "id": msg_id,
                            "from": username, "to": to, "text": text, "ts": ts}
-                _chat_save(room, username, text, ts)
                 await _chat.send_to(username, payload)
                 if to != username:
                     await _chat.send_to(to, payload)
+
+            elif mtype == "admin":
+                is_admin, _, _ = _get_user_flags(username)
+                if not is_admin:
+                    await ws.send_text(json.dumps({"type": "error", "text": "Not authorized"}))
+                    continue
+
+                action      = msg.get("action", "")
+                target      = msg.get("target", "").strip().lower()
+                room        = msg.get("room", "general")
+                target_user = msg.get("target_user")  # optional, for delete
+
+                if action in ("mute", "unmute") and target:
+                    _set_user_flag(target, "is_muted", action == "mute")
+                    label = "muted" if action == "mute" else "unmuted"
+                    await ws.send_text(json.dumps(
+                        {"type": "system", "room": room, "text": f"[admin] {target} {label}"}))
+
+                elif action in ("ban", "unban") and target:
+                    _set_user_flag(target, "is_banned", action == "ban")
+                    if action == "ban":
+                        await _chat.kick(target, reason="You have been banned")
+                    label = "banned" if action == "ban" else "unbanned"
+                    await ws.send_text(json.dumps(
+                        {"type": "system", "room": room, "text": f"[admin] {target} {label}"}))
+
+                elif action == "kick" and target:
+                    await _chat.kick(target, reason="You have been kicked")
+                    await ws.send_text(json.dumps(
+                        {"type": "system", "room": room, "text": f"[admin] {target} kicked"}))
+
+                elif action == "delete":
+                    msg_id = _chat_delete_last(room, target_user or None)
+                    if msg_id:
+                        await _chat.broadcast_room(room,
+                            {"type": "message_deleted", "room": room, "msg_id": msg_id})
+                    else:
+                        await ws.send_text(json.dumps(
+                            {"type": "error", "text": "No message found to delete"}))
 
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass

@@ -18,6 +18,7 @@ Key bindings (in PANE mode):
 """
 
 import curses
+from datetime import datetime, timezone
 
 import brodberg_session
 import chat_data
@@ -49,6 +50,17 @@ def _put(stdscr, row, col, text, color, bold=False):
         stdscr.attroff(attr)
     except Exception:
         pass
+
+
+def _fmt_ts(ts: str) -> str:
+    """Convert an ISO UTC timestamp to local HH:MM.  Falls back gracefully."""
+    if not ts:
+        return "     "
+    try:
+        dt = datetime.fromisoformat(ts)          # parses "2026-04-13T20:45:37+00:00"
+        return dt.astimezone().strftime("%H:%M")  # system local time
+    except (ValueError, TypeError):
+        return f"{ts[:5]:>5}"                     # old "HH:MM" rows — display as-is
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +125,9 @@ def on_keypress(key: int, cache: dict) -> dict:
 
     # ↑ — scroll up (older messages)
     if key == curses.KEY_UP:
-        return {**cache, "scroll": scroll + 1}
+        total     = len(chat_data.get_messages(rooms[active_room]))
+        max_scroll = max(0, total - 1)
+        return {**cache, "scroll": min(scroll + 1, max_scroll)}
 
     # ↓ — scroll down (newer messages)
     if key == curses.KEY_DOWN:
@@ -128,7 +142,26 @@ def on_keypress(key: int, cache: dict) -> dict:
         text = compose.strip()
         if text:
             room = rooms[active_room]
-            if room == "general":
+            if text.startswith("/"):
+                # Admin slash command
+                cmd_parts = text[1:].split()
+                action    = cmd_parts[0].lower() if cmd_parts else ""
+                target    = cmd_parts[1].lower() if len(cmd_parts) > 1 else ""
+                if action in ("mute", "unmute", "ban", "unban", "kick") and target:
+                    chat_data.send({
+                        "type":   "admin",
+                        "action": action,
+                        "target": target,
+                        "room":   room,
+                    })
+                elif action == "del":
+                    chat_data.send({
+                        "type":        "admin",
+                        "action":      "delete",
+                        "room":        room,
+                        "target_user": target or None,
+                    })
+            elif room == "general":
                 chat_data.send({"type": "message", "room": "general", "text": text})
             else:
                 # DM room: extract the other participant
@@ -230,31 +263,30 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     start_idx = max(0, end_idx - msg_area_rows)
     visible   = msgs[start_idx:end_idx]
 
-    name_w = 12   # fixed column width for username
+    name_w   = 14   # wide enough for "jackbroderick" (13) + 1
+    # Layout: col 2 = timestamp (5), col 9 = name (name_w) + ":", col 9+name_w+2 = text
+    text_col = 9 + name_w + 2   # +1 colon +1 space
 
     for i, msg in enumerate(visible):
-        row      = msg_area_top + i
-        sender   = msg.get("from", "")
-        text     = msg.get("text", "")
-        ts       = msg.get("ts", "")
-        is_me    = (sender == me)
-        is_sys   = (sender == "system")
+        row    = msg_area_top + i
+        sender = msg.get("from", "")
+        text   = msg.get("text", "")
+        ts     = msg.get("ts", "")
+        is_me  = (sender == me)
+        is_sys = (sender == "system")
 
         if is_sys:
-            line = f"  {'':5}  {'':>{name_w}}  {text}"
-            _put(stdscr, row, 0, line[:width - 1], colors["dim"])
+            indent = " " * text_col
+            _put(stdscr, row, 0, (indent + text)[:width - 1], colors["dim"])
             continue
 
-        ts_str   = f"{ts:5}" if ts else "     "
+        ts_str   = _fmt_ts(ts)
         name_str = sender[:name_w].rjust(name_w)
 
-        # Timestamp + name
         _put(stdscr, row, 2, ts_str, colors["dim"])
         name_color = colors["orange"] if is_me else colors["dim"]
-        _put(stdscr, row, 9, name_str, name_color, bold=is_me)
+        _put(stdscr, row, 9, name_str + ":", name_color, bold=is_me)
 
-        # Message text
-        text_col = 9 + name_w + 2
         max_text = max(0, width - text_col - 1)
         _put(stdscr, row, text_col, text[:max_text],
              colors["orange"] if is_me else colors["dim"])
@@ -274,7 +306,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     compose_line  = f"  >  {display}{cursor}"
     _put(stdscr, compose_row, 0, compose_line[:width - 1], colors["orange"])
 
-    hint = "  Tab room   ↑↓ scroll   Enter send   ` exit"
+    hint = "  Tab room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   ` exit"
     _put(stdscr, hint_row, 0, hint[:width - 1], colors["dim"])
 
     _put(stdscr, bottom_sep_row, 0, sep, colors["dim"])
