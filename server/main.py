@@ -1053,7 +1053,7 @@ def login(req: LoginRequest):
 def get_profile(username: str):
     with _db_conn() as conn:
         cur = _execute(conn,
-            "SELECT username, created_at, bio, location FROM users WHERE username = ?",
+            "SELECT username, created_at, bio, location, is_admin FROM users WHERE username = ?",
             (username.lower(),))
         row = cur.fetchone()
 
@@ -1066,7 +1066,7 @@ def get_profile(username: str):
 def get_me(username: str = Depends(_current_user)):
     with _db_conn() as conn:
         cur = _execute(conn,
-            "SELECT username, created_at, bio, location FROM users WHERE username = ?",
+            "SELECT username, created_at, bio, location, is_admin FROM users WHERE username = ?",
             (username,))
         row = cur.fetchone()
 

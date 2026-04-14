@@ -320,8 +320,11 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         r += 2
 
     if user:
-        is_me = (user.get("username") == brodberg_session.get_current_user())
-        label = "YOUR PROFILE" if is_me else user.get("username", "").upper()
+        is_me    = (user.get("username") == brodberg_session.get_current_user())
+        is_admin = bool(user.get("is_admin", False))
+        label    = "YOUR PROFILE" if is_me else user.get("username", "").upper()
+        if is_admin:
+            label += "  ♠"
         _put(stdscr, r, 2, label, colors["orange"], bold=True); r += 1
         _put(stdscr, r, 0, sep, colors["dim"]); r += 1
 
@@ -331,7 +334,10 @@ def render(stdscr, cache: dict, colors: dict) -> None:
             _put(stdscr, r, 20, val or "—", colors["orange"])
             r += 1
 
-        info_row("Username",      user.get("username",   ""))
+        username_display = user.get("username", "")
+        if is_admin:
+            username_display += "  ♠  Admin"
+        info_row("Username",      username_display)
         info_row("Member since",  user.get("created_at", ""))
         info_row("Location",      user.get("location",   ""))
         info_row("Bio",           user.get("bio",        ""))
