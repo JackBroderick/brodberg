@@ -117,10 +117,15 @@ def on_keypress(key: int, cache: dict) -> dict:
     scroll      = cache.get("scroll", 0)
     me          = cache.get("me", "")
 
-    # Tab — cycle rooms
-    if key == 9:
+    # ← / → — cycle rooms
+    if key == curses.KEY_LEFT:
+        new_idx = (active_room - 1) % len(rooms)
+        chat_data.join_room(rooms[new_idx])
+        return {**cache, "active_room": new_idx, "scroll": 0}
+
+    if key == curses.KEY_RIGHT:
         new_idx = (active_room + 1) % len(rooms)
-        chat_data.join_room(rooms[new_idx])   # request history if not loaded
+        chat_data.join_room(rooms[new_idx])
         return {**cache, "active_room": new_idx, "scroll": 0}
 
     # ↑ — scroll up (older messages)
@@ -281,15 +286,13 @@ def render(stdscr, cache: dict, colors: dict) -> None:
             continue
 
         is_admin_sender = msg.get("admin", False)
-        ts_str = _fmt_ts(ts)
-
-        # Admin gets a star marker; truncate name to keep total width = name_w
-        if is_admin_sender:
-            name_str = sender[:(name_w - 2)].rjust(name_w - 2) + " ★"
-        else:
-            name_str = sender[:name_w].rjust(name_w)
+        ts_str   = _fmt_ts(ts)
+        name_str = sender[:name_w].rjust(name_w)
 
         _put(stdscr, row, 2, ts_str, colors["dim"])
+        # Admin marker sits in the gap at col 8 — name field stays full width
+        if is_admin_sender:
+            _put(stdscr, row, 8, "♠", colors["orange"], bold=True)
         name_color = colors["orange"] if (is_me or is_admin_sender) else colors["dim"]
         _put(stdscr, row, 9, name_str + ":", name_color, bold=(is_me or is_admin_sender))
 
@@ -312,7 +315,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     compose_line  = f"  >  {display}{cursor}"
     _put(stdscr, compose_row, 0, compose_line[:width - 1], colors["orange"])
 
-    hint = "  Tab room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   ` exit"
+    hint = "  ←→ room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   ` exit"
     _put(stdscr, hint_row, 0, hint[:width - 1], colors["dim"])
 
     _put(stdscr, bottom_sep_row, 0, sep, colors["dim"])
