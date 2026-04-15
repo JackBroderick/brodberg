@@ -216,6 +216,10 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
                                             if m.get("id") != msg_id
                                         ]
 
+                        elif mtype == "room_cleared":
+                            room = msg.get("room", "general")
+                            clear_messages(room)
+
                         elif mtype == "kicked":
                             reason = msg.get("reason", "kicked")
                             _append("general", {

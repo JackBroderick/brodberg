@@ -223,7 +223,11 @@ def on_keypress(key: int, cache: dict) -> dict:
                         "target_user": target or None,
                     })
                 elif action == "clear":
-                    chat_data.clear_messages(room)
+                    chat_data.send({
+                        "type":   "admin",
+                        "action": "clear",
+                        "room":   room,
+                    })
             elif room == "general":
                 chat_data.send({"type": "message", "room": "general", "text": text})
             else:

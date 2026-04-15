@@ -932,6 +932,18 @@ def _chat_delete_last(room: str, from_user: str | None = None) -> int | None:
         return None
 
 
+def _chat_clear_room(room: str) -> bool:
+    """Delete all messages in a room. Returns True on success."""
+    try:
+        with _db_conn() as conn:
+            _execute(conn, "DELETE FROM chat_messages WHERE room = ?", (room,))
+            conn.commit()
+        return True
+    except Exception as e:
+        print(f"[CHAT] db clear error: {e}")
+        return False
+
+
 def _get_user_flags(username: str) -> tuple:
     """Returns (is_admin, is_muted, is_banned) for a user."""
     try:
@@ -1563,6 +1575,14 @@ async def chat_ws(ws: WebSocket):
                     else:
                         await ws.send_text(json.dumps(
                             {"type": "error", "text": "No message found to delete"}))
+
+                elif action == "clear":
+                    if _chat_clear_room(room):
+                        await _chat.broadcast_room(room,
+                            {"type": "room_cleared", "room": room})
+                    else:
+                        await ws.send_text(json.dumps(
+                            {"type": "error", "text": "Failed to clear room"}))
 
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
