@@ -158,6 +158,8 @@ def _submit(cache: dict) -> dict:
                                     headers={"Authorization": f"Bearer {data['token']}"},
                                     timeout=TIMEOUT)
                 user = pr.json() if pr.status_code == 200 else None
+                if user:
+                    brodberg_session.save_session({"is_admin": bool(user.get("is_admin", False))})
                 return _result("LOGIN", f"Welcome back, {data['username']}.", "ok", user=user)
             return {**cache, "status": "error", "message": data.get("detail", "Login failed.")}
         except Exception as e:

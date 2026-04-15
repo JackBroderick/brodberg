@@ -1091,10 +1091,9 @@ def get_dm_threads(username: str = Depends(_current_user)):
     with _db_conn() as conn:
         cur = _execute(conn,
             "SELECT DISTINCT room FROM chat_messages "
-            "WHERE room LIKE 'dm:' || ? || ':%' "
-            "   OR room LIKE 'dm:%:' || ? "
+            "WHERE room LIKE ? OR room LIKE ? "
             "ORDER BY room",
-            (username, username))
+            (f"dm:{username}:%", f"dm:%:{username}"))
         rows = cur.fetchall()
     return {"rooms": [row["room"] for row in rows]}
 

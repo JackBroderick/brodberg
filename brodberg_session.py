@@ -85,6 +85,10 @@ def is_logged_in() -> bool:
     return bool(s.get("token") and s.get("username"))
 
 
+def get_is_admin() -> bool:
+    return bool(load_session().get("is_admin", False))
+
+
 # ---------------------------------------------------------------------------
 # Server URL helpers
 # ---------------------------------------------------------------------------

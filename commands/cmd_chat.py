@@ -102,6 +102,7 @@ def fetch(parts: list) -> dict:
         "error":       None,
         "form_mode":   True,
         "me":          me,
+        "is_admin":    brodberg_session.get_is_admin(),
         "rooms":       rooms,
         "active_room": active,
         "compose":     "",
@@ -321,7 +322,11 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     compose_line  = f"  >  {display}{cursor}"
     _put(stdscr, compose_row, 0, compose_line[:width - 1], colors["orange"])
 
-    hint = "  ←→ room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   ` exit"
+    is_admin = cache.get("is_admin", False)
+    if is_admin:
+        hint = "  ←→ room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   ` exit"
+    else:
+        hint = "  ←→ room   ↑↓ scroll   Enter send   ` exit"
     _put(stdscr, hint_row, 0, hint[:width - 1], colors["dim"])
 
     _put(stdscr, bottom_sep_row, 0, sep, colors["dim"])
