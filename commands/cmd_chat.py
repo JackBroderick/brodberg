@@ -18,15 +18,64 @@ Key bindings (in PANE mode):
 """
 
 import curses
+import re
 from datetime import datetime, timezone
 
 import brodberg_session
 import chat_data
+import market_data
+
+
+# ---------------------------------------------------------------------------
+# Ticker pattern
+# ---------------------------------------------------------------------------
+
+_TICKER_RE = re.compile(r'(\$[A-Za-z]{1,6})')
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _render_message_text(stdscr, row, col, text, max_width, base_color, colors):
+    """
+    Render a chat message, highlighting $TICKER tokens with live price change colors.
+    Segments are written sequentially; total output is capped at max_width chars.
+    """
+    segments  = _TICKER_RE.split(text)
+    x         = col
+    remaining = max_width
+
+    for seg in segments:
+        if remaining <= 0:
+            break
+        if not seg:
+            continue
+
+        if _TICKER_RE.fullmatch(seg):
+            symbol = seg[1:].upper()
+            market_data.request_chat_quote(symbol)
+            change_pct = market_data.get_chat_quote(symbol)
+
+            if change_pct is None:
+                display = seg          # still loading — show bare $TICKER
+                color   = colors["dim"]
+                bold    = False
+            else:
+                sign    = "+" if change_pct >= 0 else ""
+                display = f"{seg} {sign}{change_pct:.2f}%"
+                color   = colors["positive"] if change_pct >= 0 else colors["negative"]
+                bold    = True
+        else:
+            display = seg
+            color   = base_color
+            bold    = False
+
+        chunk = display[:remaining]
+        _put(stdscr, row, x, chunk, color, bold=bold)
+        x         += len(chunk)
+        remaining -= len(chunk)
+
 
 def _room_label(room: str, me: str) -> str:
     if room == "general":
@@ -303,9 +352,9 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         name_color = colors["orange"] if (is_me or is_admin_sender) else colors["dim"]
         _put(stdscr, row, 9, name_str + ":", name_color, bold=(is_me or is_admin_sender))
 
-        max_text = max(0, width - text_col - 1)
-        _put(stdscr, row, text_col, text[:max_text],
-             colors["orange"] if is_me else colors["dim"])
+        max_text   = max(0, width - text_col - 1)
+        base_color = colors["orange"] if is_me else colors["dim"]
+        _render_message_text(stdscr, row, text_col, text, max_text, base_color, colors)
 
     # ── Scroll indicator ──────────────────────────────────────────────────
     if total > msg_area_rows and scroll > 0:

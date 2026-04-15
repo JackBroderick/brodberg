@@ -395,3 +395,60 @@ def fetch_quote_data(ticker):
         return q, None
     except Exception as e:
         return None, str(e)
+
+
+# ---------------------------------------------------------------------------
+# Chat inline ticker cache
+# ---------------------------------------------------------------------------
+# Tickers mentioned in chat messages (e.g. $NVDA) are fetched once in the
+# background and cached here.  The render loop reads from this cache — it
+# never blocks or makes network calls.
+
+_CHAT_TICKER_TTL     = 300   # seconds before a cached quote is considered stale
+_chat_ticker_cache: dict = {}   # symbol → {"change_pct": float|None, "loading": bool, "fetched_at": float}
+_chat_ticker_lock    = threading.Lock()
+
+
+def request_chat_quote(symbol: str) -> None:
+    """
+    Ensure a background fetch is running for `symbol`.
+    Safe to call from the render loop — returns immediately.
+    If already loading or recently fetched, does nothing.
+    """
+    sym = symbol.upper()
+    with _chat_ticker_lock:
+        entry = _chat_ticker_cache.get(sym)
+        if entry:
+            if entry.get("loading"):
+                return
+            if time.time() - entry.get("fetched_at", 0) < _CHAT_TICKER_TTL:
+                return
+        # Mark as loading so concurrent renders don't double-fetch
+        _chat_ticker_cache[sym] = {"change_pct": None, "loading": True, "fetched_at": time.time()}
+
+    def _fetch():
+        try:
+            raw        = _fetch_raw_quote(sym)
+            change_pct = raw.get("dp") if raw else None
+        except Exception:
+            change_pct = None
+        with _chat_ticker_lock:
+            _chat_ticker_cache[sym] = {
+                "change_pct": change_pct,
+                "loading":    False,
+                "fetched_at": time.time(),
+            }
+
+    threading.Thread(target=_fetch, daemon=True, name=f"chat-ticker-{sym}").start()
+
+
+def get_chat_quote(symbol: str):
+    """
+    Return the cached daily change % for `symbol`, or None if not yet loaded.
+    Never blocks.
+    """
+    with _chat_ticker_lock:
+        entry = _chat_ticker_cache.get(symbol.upper())
+        if entry and not entry.get("loading"):
+            return entry.get("change_pct")
+        return None
