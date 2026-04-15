@@ -58,12 +58,12 @@ def _render_message_text(stdscr, row, col, text, max_width, base_color, colors):
             change_pct = market_data.get_chat_quote(symbol)
 
             if change_pct is None:
-                display = seg          # still loading — show bare $TICKER
+                display = f"|{symbol} ...|"   # still loading
                 color   = colors["dim"]
                 bold    = False
             else:
                 sign    = "+" if change_pct >= 0 else ""
-                display = f"{seg} {sign}{change_pct:.2f}%"
+                display = f"|{symbol} {sign}{change_pct:.2f}%|"
                 color   = colors["positive"] if change_pct >= 0 else colors["negative"]
                 bold    = True
         else:
@@ -222,6 +222,8 @@ def on_keypress(key: int, cache: dict) -> dict:
                         "room":        room,
                         "target_user": target or None,
                     })
+                elif action == "clear":
+                    chat_data.clear_messages(room)
             elif room == "general":
                 chat_data.send({"type": "message", "room": "general", "text": text})
             else:
@@ -373,7 +375,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
 
     is_admin = cache.get("is_admin", False)
     if is_admin:
-        hint = "  ←→ room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   ` exit"
+        hint = "  ←→ room   ↑↓ scroll   Enter send   /kick /mute /ban /del <user>   /clear   ` exit"
     else:
         hint = "  ←→ room   ↑↓ scroll   Enter send   ` exit"
     _put(stdscr, hint_row, 0, hint[:width - 1], colors["dim"])
