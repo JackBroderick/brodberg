@@ -3,8 +3,8 @@ commands/cmd_chat.py
 --------------------
 Implements the CHAT command — real-time chat with general room and DMs.
 
-  CHAT               — open the general chat room
-  CHAT <username>    — open a DM with that user (general room also available)
+  CHAT               — open all default rooms (#general, #biotech, #smallcap, #support, #random)
+  CHAT <username>    — open a DM with that user (all rooms also available)
 
 Requires login.  Uses form_mode=True so main.py routes ALL keystrokes here.
 
@@ -12,8 +12,9 @@ Key bindings (in PANE mode):
   Any printable key  — type into the compose bar
   Backspace          — delete last character
   Enter              — send message
-  Tab                — cycle between open rooms
+  ← / →             — cycle between rooms
   ↑ / ↓             — scroll message history
+  Tab                — cycle to next terminal pane (handled by main.py)
   ` (backtick)       — return to INPUT mode  (handled by main.py, not here)
 """
 
@@ -97,13 +98,11 @@ def _render_message_text(stdscr, row, col, text, max_width, base_color, colors):
 
 
 def _room_label(room: str, me: str) -> str:
-    if room == "general":
-        return "#general"
     if room.startswith("dm:"):
         parts = room[3:].split(":")
         other = next((p for p in parts if p != me), parts[0])
         return f"DM: {other}"
-    return room
+    return f"#{room}"
 
 
 def _dm_room(me: str, other: str) -> str:
@@ -156,7 +155,7 @@ def fetch(parts: list) -> dict:
         }
 
     me     = brodberg_session.get_current_user()
-    rooms  = ["general"]
+    rooms  = ["general", "biotech", "smallcap", "support", "random"]
     active = 0
 
     # Auto-load all existing DM threads
@@ -257,14 +256,13 @@ def on_keypress(key: int, cache: dict) -> dict:
                         "action": "clear",
                         "room":   room,
                     })
-            elif room == "general":
-                chat_data.send({"type": "message", "room": "general", "text": text})
-            else:
-                # DM room: extract the other participant
+            elif room.startswith("dm:"):
                 parts = room[3:].split(":")
                 to    = next((p for p in parts if p != me.lower()), None)
                 if to:
                     chat_data.send({"type": "dm", "to": to, "text": text})
+            else:
+                chat_data.send({"type": "message", "room": room, "text": text})
         return {**cache, "compose": "", "scroll": 0}
 
     # Printable character

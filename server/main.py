@@ -853,12 +853,12 @@ class _ChatManager:
             self.disconnect(username)
 
     async def broadcast_room(self, room: str, payload: dict) -> None:
-        """Broadcast to relevant users: all for general, participants for DMs."""
-        if room == "general":
-            await self.broadcast(payload)
-        elif room.startswith("dm:"):
+        """Broadcast to relevant users: DM participants only, everyone for public rooms."""
+        if room.startswith("dm:"):
             for user in room[3:].split(":"):
                 await self.send_to(user, payload)
+        else:
+            await self.broadcast(payload)
 
 
 _chat = _ChatManager()

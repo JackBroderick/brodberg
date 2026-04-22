@@ -145,6 +145,7 @@ def main(stdscr):
     input_focused = True   # True  = INPUT mode  (all keys go to command bar)
                            # False = PANE mode   (Z / Tab / arrows navigate)
     zoomed        = True   # True  = focused pane fills screen, others as tabs
+    pre_form_zoom = None   # zoom state saved before a form_mode pane auto-zoomed
 
     # ── Input state ───────────────────────────────────────────────────────
     command  = ""
@@ -220,6 +221,9 @@ def main(stdscr):
                 # Stay in input mode on an error so the user can retype.
                 if not active.startswith("ERROR:"):
                     input_focused = False
+                    if cache.get("form_mode", False):
+                        pre_form_zoom = zoomed
+                        zoomed = True
 
             elif key == curses.KEY_UP:
                 if history:
@@ -249,9 +253,10 @@ def main(stdscr):
             pane      = panes[focused_pane]
             form_mode = pane["cache"].get("form_mode", False)
 
-            if form_mode and key != -1:
+            if form_mode and key not in (9,) and key != -1:
                 # Active pane has an interactive form — route ALL keystrokes
                 # to its on_keypress handler (typing, backspace, Enter, arrows).
+                # Tab (9) is excluded so it always cycles panes even in form_mode.
                 pane["cache"] = dispatch_keypress(
                     key,
                     pane["activecommand"],
@@ -268,7 +273,15 @@ def main(stdscr):
                     stdscr.nodelay(True)
                     while stdscr.getch() != -1:
                         pass
+                    leaving_form = panes[focused_pane]["cache"].get("form_mode", False)
                     focused_pane = (focused_pane + 1) % MAX_PANES
+                    entering_form = panes[focused_pane]["cache"].get("form_mode", False)
+                    if entering_form and not leaving_form:
+                        pre_form_zoom = zoomed
+                        zoomed = True
+                    elif leaving_form and not entering_form and pre_form_zoom is not None:
+                        zoomed = pre_form_zoom
+                        pre_form_zoom = None
 
                 # Arrow keys + Enter — route to active command's on_keypress handler
                 elif key in (curses.KEY_UP, curses.KEY_DOWN,
