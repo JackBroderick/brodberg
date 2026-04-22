@@ -3,11 +3,14 @@ commands/cmd_gip.py
 -------------------
 Implements the  GIP <TICKER> [TIMEFRAME]  command (Graph In Period).
 
-  fetch(parts)                  -> cache dict
-  render(stdscr, cache, colors) -> None
-  on_keypress(key, cache)       -> cache dict   ← arrow key navigation
+  fetch(parts)                  -> cache dict   (returns immediately)
+  render(stdscr, cache, colors) -> None         (state machine)
+  on_keypress(key, cache)       -> cache dict   (arrow key navigation)
 
-Displays a block-character price chart for the requested ticker and timeframe.
+Fetch runs in a background thread — the UI never freezes.
+While data loads, a Brian's Brain cellular automaton fills the pane.
+When the fetch completes, the automaton is crushed flat (rows clear top-down)
+before the price chart slides in.
 
 Usage:
   GIP AAPL          <- defaults to 1Y
@@ -17,59 +20,98 @@ Usage:
   GIP AAPL 1Y       <- 1 year
   GIP AAPL YTD      <- year to date
 
-Arrow key navigation (when GIP is the active command):
+Arrow key navigation (when GIP is the active command, in pane mode):
   ← / →   cycle through timeframes: 1W → 1M → 3M → 1Y → YTD
-           (triggers a re-fetch for the new period)
-
-Supported timeframes are defined in market_data.TIMEFRAME_MAP.
 """
 
+import threading
 import curses
+
 import chart
 import market_data
+from ui.loading import render_loading, start_crush
 
 
 # Ordered cycle of timeframes for ← / → navigation.
-# Must be valid keys in market_data.TIMEFRAME_MAP.
 TIMEFRAME_CYCLE = ["1W", "1M", "3M", "1Y", "YTD"]
+
+# First subwindow row available for the automaton (rows 0-4 are tab bar / chrome).
+_CONTENT_START = 5
 
 
 # ---------------------------------------------------------------------------
-# fetch — called once on Enter (and again by on_keypress on timeframe change)
+# Internal: kick off a background fetch and return the initial cache
+# ---------------------------------------------------------------------------
+
+def _start_fetch(ticker: str, timeframe: str) -> dict:
+    """
+    Return an initial loading cache and immediately spawn a daemon thread
+    that writes its result into cache["_fetch_result"] when done.
+    """
+    result = {"data": None, "error": None, "done": False}
+    cache  = {
+        # Public keys (used by render / chart)
+        "data":            None,
+        "error":           None,
+        "ticker":          ticker,
+        "timeframe":       timeframe,
+        "loading":         True,
+        # Shared result dict — worker thread writes here
+        "_fetch_result":   result,
+        # Brian's Brain state — initialised on first render
+        "_bb_grid":        None,
+        "_bb_crush_frame": -1,
+    }
+
+    def _worker():
+        data, error       = market_data.fetch_gip_data(ticker, timeframe)
+        result["data"]    = data
+        result["error"]   = error
+        result["done"]    = True   # ← render() polls this
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return cache
+
+
+# ---------------------------------------------------------------------------
+# fetch  — called once on Enter; returns immediately
 # ---------------------------------------------------------------------------
 
 def fetch(parts: list) -> dict:
     """
-    parts = ["GIP", "AAPL"]        — uses default timeframe
-    parts = ["GIP", "AAPL", "3M"]  — uses specified timeframe
+    parts = ["GIP", "AAPL"]        → uses DEFAULT_TIMEFRAME
+    parts = ["GIP", "AAPL", "3M"]  → uses specified timeframe
 
     Already upper-cased by the registry.
-    Returns a cache dict with keys "data" and "error".
     """
     ticker    = parts[1] if len(parts) > 1 else None
     timeframe = parts[2] if len(parts) > 2 else market_data.DEFAULT_TIMEFRAME
-
-    data, error = market_data.fetch_gip_data(ticker, timeframe)
-    return {"data": data, "error": error, "ticker": ticker, "timeframe": timeframe}
+    if timeframe:
+        timeframe = timeframe.upper()
+    return _start_fetch(ticker, timeframe)
 
 
 # ---------------------------------------------------------------------------
-# on_keypress — timeframe cycling via ← / →
+# on_keypress  — timeframe cycling via ← / →  (also non-blocking)
 # ---------------------------------------------------------------------------
 
 def on_keypress(key: int, cache: dict) -> dict:
     """
     ← / →  step backward / forward through TIMEFRAME_CYCLE and re-fetch.
 
-    Returns the new cache dict (re-fetched for the new timeframe).
+    Ignored while a fetch is already in flight.
+    Returns a fresh cache dict (new background fetch started).
     """
-    ticker    = cache.get("ticker") or (cache.get("data") or {}).get("ticker")
+    # Don't queue a second fetch while one is running
+    if cache.get("loading"):
+        return cache
+
+    ticker    = cache.get("ticker") or (cache.get("data") or {}).get("symbol")
     timeframe = cache.get("timeframe", market_data.DEFAULT_TIMEFRAME)
 
     if not ticker:
         return cache
 
-    # Normalise timeframe to something in TIMEFRAME_CYCLE
     if timeframe not in TIMEFRAME_CYCLE:
         timeframe = market_data.DEFAULT_TIMEFRAME
     if timeframe not in TIMEFRAME_CYCLE:
@@ -84,34 +126,61 @@ def on_keypress(key: int, cache: dict) -> dict:
     else:
         return cache
 
-    data, error = market_data.fetch_gip_data(ticker, new_tf)
-    return {"data": data, "error": error, "ticker": ticker, "timeframe": new_tf}
+    return _start_fetch(ticker, new_tf)
 
 
 # ---------------------------------------------------------------------------
-# render — called every frame, must never hit the API
+# render  — called every frame; state machine: loading → crush → chart
 # ---------------------------------------------------------------------------
 
 def render(stdscr, cache: dict, colors: dict) -> None:
     """
-    Render the GIP chart from the previously fetched cache.
-    Delegates all drawing to chart.render_gip().
-    Adds a timeframe tab bar above the chart for navigation context.
+    Three states drive the display:
+
+    1. loading=True, crush_frame=-1  →  automaton running, data still in flight
+    2. loading=True, crush_frame≥0   →  data arrived, crush animation in progress
+    3. loading=False                 →  chart rendered normally
     """
-    _, width = stdscr.getmaxyx()
+    win_h, win_w = stdscr.getmaxyx()
 
-    # ── Timeframe tab bar ─────────────────────────────────────────────────
+    # ── Timeframe tab bar (always shown) ──────────────────────────────────
     timeframe = cache.get("timeframe", market_data.DEFAULT_TIMEFRAME)
-    _render_tf_bar(stdscr, 4, timeframe, colors, width)
+    _render_tf_bar(stdscr, 4, timeframe, colors, win_w)
 
+    # ── Loading / crush phase ──────────────────────────────────────────────
+    if cache.get("loading"):
+        result = cache.get("_fetch_result", {})
+
+        # Data just landed — arm the crush (only fires once)
+        if result.get("done") and cache.get("_bb_crush_frame", -1) < 0:
+            start_crush(cache)
+
+        ticker     = cache.get("ticker") or ""
+        crush_done = render_loading(
+            stdscr, cache, colors,
+            start_row = _CONTENT_START,
+            label     = f"FETCHING  {ticker}",
+        )
+
+        if crush_done:
+            # Promote fetched result → normal cache keys
+            cache["data"]    = result.get("data")
+            cache["error"]   = result.get("error")
+            cache["loading"] = False
+        return
+
+    # ── Chart ─────────────────────────────────────────────────────────────
     chart.render_gip(stdscr, cache, colors)
 
 
+# ---------------------------------------------------------------------------
+# Tab bar
+# ---------------------------------------------------------------------------
+
 def _render_tf_bar(stdscr, row: int, active: str, colors: dict, width: int):
     """
-    Draw the timeframe selector tab bar.
-    Active timeframe is highlighted; others are dim.
-    Arrow key hint is shown on the right.
+    Draw the timeframe selector.  Active timeframe is highlighted orange;
+    others are dim.
     """
     def _put(r, c, text, color, bold=False):
         attr = color | (curses.A_BOLD if bold else 0)
@@ -131,6 +200,3 @@ def _render_tf_bar(stdscr, row: int, active: str, colors: dict, width: int):
             label = f"  {tf}  "
             _put(row, col, label, colors["dim"])
         col += len(label)
-
-    hint = ""
-    _put(row, col + 2, hint, colors["dim"])

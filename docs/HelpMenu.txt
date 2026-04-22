@@ -1,8 +1,11 @@
 ## General
 
   HELP               - Browse command reference  (← → switch category  ↑ ↓ scroll)
+
   CL                 - Version change log
+
   CLEAR              - Clear the active pane
+
   EXIT               - Close the terminal
 
 ## Equity
@@ -81,11 +84,17 @@
 ## Account
 
   USER               - View your own profile
+
   USER login         - Sign in  (interactive form — ↑ ↓ navigate, Enter submit)
+
   USER register      - Create an account  (interactive form)
+
   USER logout        - Sign out
+
   USER edit          - Edit bio and location  (interactive form)
+
   USER <username>    - View another user's profile
+
 
 ## Navigation
 
@@ -93,12 +102,18 @@
 
   INPUT mode
     Type a command and press Enter to run it.
+
     ↑ ↓              - Scroll command history
+
     After Enter, the terminal auto-switches to PANE mode.
+
     Press ` at any time to return to INPUT mode.
 
   PANE mode  (enters automatically after every command)
     Z                - Toggle zoom  (focused pane fills screen; others as tabs)
+
     Tab              - Cycle focused pane
+
     ↑ ↓              - Scroll or navigate  (command-specific)
+    
     ← →              - Switch tab / timeframe  (GIP, FA, FX, HELP)
