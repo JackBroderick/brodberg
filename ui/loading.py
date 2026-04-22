@@ -1,116 +1,297 @@
 """
 ui/loading.py
 -------------
-Brian's Brain cellular automaton — reusable loading screen for Brodberg.
+Radar sweep loading screen for Brodberg.
 
-Brian's Brain rules (3-state automaton):
-  FIRING     (1) → REFRACTORY (2)  unconditionally
-  REFRACTORY (2) → OFF        (0)  unconditionally
-  OFF        (0) → FIRING     (1)  iff exactly 2 of 8 neighbors are FIRING
+A circular radar dish rotates a sweep arm and picks up random signal blips.
+When data arrives (start_crush called), the arm freezes, crosshairs lock onto
+the ticker, then the radar dissolves inward to reveal the chart.
 
-Visual:
-  FIRING     → ●  bright orange (bold)
-  REFRACTORY → ·  dim
-  OFF        → (space / background)
+Visual anatomy:
+  ──────── circle boundary drawn with ╱  ╲  ─  │  per angle
+  ········ range rings at 1/3 and 2/3 radius
+  · trail of past sweep arm positions (dim)
+  · current sweep arm (bright orange, bold)
+  ◉ detected signal blips (brighten on detect, fade over time)
+  ── crosshairs + [ TICKER ] during lock-on
+  ◈ SIGNAL ACQUIRED ◈ status line
 
-Crush animation:
-  When data arrives, call start_crush(cache).  The automaton grid freezes
-  and its rows are erased top-down at _CRUSH_SPEED rows/frame, compressing
-  the chaos downward until the pane is blank.  render_loading() returns True
-  the frame the crush completes — caller switches to chart rendering.
-
-Usage (inside a command's render() function):
-    from ui.loading import render_loading, start_crush
-
-    if cache.get("loading"):
-        if fetch_is_done(cache):
-            start_crush(cache)
-        done = render_loading(stdscr, cache, colors,
-                              start_row=5, label="FETCHING AAPL")
-        if done:
-            cache["loading"] = False
-            cache["data"]    = ...
-        return
+Public API (unchanged from Brian's Brain version):
+  render_loading(stdscr, cache, colors, start_row, label) -> bool
+  start_crush(cache)
 """
 
+import math
 import random
 import time
 import curses
 
-# ── Cell states ────────────────────────────────────────────────────────────
-_OFF  = 0   # dead
-_FIRE = 1   # firing    (→ REFRACTORY next step)
-_REFR = 2   # refractory (→ OFF next step)
 
-_FIRE_CHAR = "●"
-_REFR_CHAR = "·"
+# ── Tuning ─────────────────────────────────────────────────────────────────
+SWEEP_SPEED    = 0.22    # radians advanced per render frame  (~10fps → ~3s/rev)
+TRAIL_LEN      = 18      # past arm positions kept in trail
+BLIP_COUNT     = 9       # number of random signal targets seeded on init
+BLIP_LIFETIME  = 4.0     # seconds a blip glows after being swept
+LOCK_HOLD      = 0.75    # seconds crosshairs hold before dissolve begins
+DISSOLVE_RATE  = 1.8     # radius units erased per frame during dissolve
 
-# Rows cleared per frame once crush begins.
-# 3 = snappy; reduce to 1-2 for a slower, more dramatic collapse.
-_CRUSH_SPEED = 3
+# ── Internal state machine ─────────────────────────────────────────────────
+_SCAN     = "scan"       # sweep rotating, fetch in flight
+_LOCK     = "lock"       # data arrived, crosshairs visible
+_DISSOLVE = "dissolve"   # radar shrinking inward, then done
 
 
 # ---------------------------------------------------------------------------
-# Grid engine
+# Helpers
 # ---------------------------------------------------------------------------
 
-def _init_grid(rows: int, cols: int, density: float = 0.30) -> list:
-    """
-    Return a randomly seeded Brian's Brain grid (list of row-lists).
-    `density` controls what fraction of cells start alive (FIRE or REFR).
-    """
-    half = density * 0.45       # slightly more REFR than FIRE at start
-    grid = []
-    for _ in range(rows):
-        row = []
-        r_val = random.random   # local ref — tiny speed-up in inner loop
-        for _ in range(cols):
-            v = r_val()
-            if v < half:
-                row.append(_FIRE)
-            elif v < density:
-                row.append(_REFR)
-            else:
-                row.append(_OFF)
-        grid.append(row)
-    return grid
+def _safe_ch(stdscr, r, c, ch, attr, h, w):
+    """addch with bounds guard — never raises."""
+    if 0 <= r < h and 0 <= c < w - 1:
+        try:
+            stdscr.addch(r, c, ch, attr)
+        except Exception:
+            pass
 
 
-def _step(grid: list, rows: int, cols: int) -> list:
+def _safe_str(stdscr, r, c, s, attr, h, w):
+    """addstr with bounds guard — never raises."""
+    if 0 <= r < h and 0 <= c < w - 1:
+        try:
+            stdscr.addstr(r, c, s[: w - c - 1], attr)
+        except Exception:
+            pass
+
+
+def _circle_char(theta: float) -> str:
     """
-    Advance Brian's Brain one generation with toroidal (wrapping) edges.
-    Optimised: pre-fetch row references and avoid repeated modulo in hot path.
+    Pick the best box-drawing character for the circle boundary at angle theta.
+
+    The radar circle is rendered as a visual ellipse in character space
+    (r_col = 2 * r_row) so that it looks like a true circle on screen given
+    the ~2:1 tall character aspect ratio.
+
+    Slope of the circle boundary in character space = -cos(θ) / (2·sin(θ)).
     """
-    new = [[_OFF] * cols for _ in range(rows)]
-    for r in range(rows):
-        ra      = (r - 1) % rows
-        rb      = (r + 1) % rows
-        row_a   = grid[ra]
-        row_c   = grid[r]
-        row_b   = grid[rb]
-        new_row = new[r]
-        for c in range(cols):
-            state = row_c[c]
-            if state == _FIRE:
-                new_row[c] = _REFR
-            elif state == _REFR:
-                pass            # already _OFF
-            else:
-                ca = (c - 1) % cols
-                cb = (c + 1) % cols
-                n = (
-                    (row_a[ca] == _FIRE) +
-                    (row_a[c]  == _FIRE) +
-                    (row_a[cb] == _FIRE) +
-                    (row_c[ca] == _FIRE) +
-                    (row_c[cb] == _FIRE) +
-                    (row_b[ca] == _FIRE) +
-                    (row_b[c]  == _FIRE) +
-                    (row_b[cb] == _FIRE)
-                )
-                if n == 2:
-                    new_row[c] = _FIRE
-    return new
+    s = math.sin(theta)
+    c = math.cos(theta)
+    if abs(s) < 0.16:          # near 0° / 180°  → boundary is vertical
+        return "│"
+    if abs(c) < 0.32:          # near 90° / 270° → boundary is horizontal
+        return "─"
+    slope = -c / (2.0 * s)
+    return "╲" if slope > 0 else "╱"
+
+
+def _in_radius(dr: int, dc: int, r_rows: int, r_cols: int,
+               limit_r: float | None) -> bool:
+    """
+    True if the character at offset (dr, dc) from radar centre lies within
+    limit_r rows of the centre (in visual / ellipse-normalised distance).
+    Pass None to always return True (no dissolve limit).
+    """
+    if limit_r is None:
+        return True
+    if r_rows == 0 or r_cols == 0:
+        return False
+    # Normalise to a unit circle in visual space
+    fr = dr / r_rows
+    fc = dc / r_cols
+    fl = limit_r / r_rows
+    return fr * fr + fc * fc <= fl * fl + 0.01   # small epsilon for boundaries
+
+
+# ---------------------------------------------------------------------------
+# Init
+# ---------------------------------------------------------------------------
+
+def _init_radar(cache: dict, win_h: int, win_w: int, start_row: int) -> None:
+    """Seed all radar state into cache._rdr_* keys."""
+    avail_rows = win_h - start_row
+    cy         = start_row + avail_rows // 2
+    cx         = win_w // 2
+
+    # Radius: must fit vertically and horizontally (accounting for 2:1 aspect)
+    r_rows = max(4, min(avail_rows // 2 - 1, win_w // 4 - 2))
+    r_cols = r_rows * 2
+
+    # Generate blips at random visual positions inside the circle
+    blips = []
+    for _ in range(BLIP_COUNT):
+        vis_angle = random.uniform(0, 2 * math.pi)
+        dist_frac = random.uniform(0.30, 0.88)
+        dr = int(round(dist_frac * r_rows * math.sin(vis_angle)))
+        dc = int(round(dist_frac * r_cols * math.cos(vis_angle)))
+        # reveal_angle: the sweep angle at which this blip gets detected
+        # atan2(visual_y, visual_x) = atan2(2·dr/r_rows, dc/r_cols) normalised
+        reveal = math.atan2(2.0 * dr, dc) % (2 * math.pi)
+        blips.append({
+            "dr": dr, "dc": dc,
+            "reveal": reveal,
+            "detected": False,
+            "detect_time": None,
+        })
+
+    cache.update({
+        "_rdr_init":       True,
+        "_rdr_win_h":      win_h,
+        "_rdr_win_w":      win_w,
+        "_rdr_start":      start_row,
+        "_rdr_cy":         cy,
+        "_rdr_cx":         cx,
+        "_rdr_r_rows":     r_rows,
+        "_rdr_r_cols":     r_cols,
+        "_rdr_angle":      -math.pi / 2,  # start at 12 o'clock
+        "_rdr_trail":      [],
+        "_rdr_blips":      blips,
+        "_rdr_state":      _SCAN,
+        "_rdr_lock_time":  None,
+        "_rdr_dissolve_r": None,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Drawing sub-routines
+# ---------------------------------------------------------------------------
+
+def _draw_rings(stdscr, cy, cx, r_rows, r_cols, limit_r, h, w, colors):
+    """Faint dotted range rings at 1/3 and 2/3 of full radius."""
+    dim = colors["dim"]
+    for frac in (0.33, 0.67):
+        rr    = r_rows * frac
+        rc    = r_cols * frac
+        steps = max(40, int(2 * math.pi * max(rr, rc) * 1.2))
+        for i in range(steps):
+            theta = 2 * math.pi * i / steps
+            dr    = round(rr * math.sin(theta))
+            dc    = round(rc * math.cos(theta))
+            if _in_radius(dr, dc, r_rows, r_cols, limit_r):
+                _safe_ch(stdscr, cy + dr, cx + dc, "·", dim, h, w)
+
+
+def _draw_circle(stdscr, cy, cx, r_rows, r_cols, limit_r, h, w, colors):
+    """Draw the outer radar circle boundary."""
+    attr  = colors["orange"]
+    steps = max(80, int(2 * math.pi * max(r_rows, r_cols) * 1.6))
+    for i in range(steps):
+        theta = 2 * math.pi * i / steps
+        dr    = round(r_rows * math.sin(theta))
+        dc    = round(r_cols * math.cos(theta))
+        if _in_radius(dr, dc, r_rows, r_cols, limit_r):
+            _safe_ch(stdscr, cy + dr, cx + dc, _circle_char(theta), attr, h, w)
+
+
+def _draw_sweep(stdscr, cy, cx, r_rows, r_cols, angle, trail,
+                limit_r, h, w, colors):
+    """Draw the rotating sweep arm and its dimming trail."""
+    dim    = colors["dim"]
+    bright = colors["orange"] | curses.A_BOLD
+
+    # Trail — past arm positions, dim
+    for ta in trail:
+        for t in range(1, r_rows + 1):
+            dr = round(t * math.sin(ta))
+            dc = round(t * 2 * math.cos(ta))
+            if _in_radius(dr, dc, r_rows, r_cols, limit_r):
+                _safe_ch(stdscr, cy + dr, cx + dc, "·", dim, h, w)
+
+    # Current arm — bright, overwrites any trail overlap
+    for t in range(1, r_rows + 1):
+        dr = round(t * math.sin(angle))
+        dc = round(t * 2 * math.cos(angle))
+        if _in_radius(dr, dc, r_rows, r_cols, limit_r):
+            _safe_ch(stdscr, cy + dr, cx + dc, "·", bright, h, w)
+
+    # Centre dot
+    if _in_radius(0, 0, r_rows, r_cols, limit_r):
+        _safe_ch(stdscr, cy, cx, "·", bright, h, w)
+
+
+def _draw_blips(stdscr, cy, cx, r_rows, r_cols, blips, limit_r, h, w, colors):
+    """Render detected blips; fade them as they age."""
+    now    = time.monotonic()
+    bright = colors["orange"] | curses.A_BOLD
+    dim    = colors["dim"]
+    for b in blips:
+        if not b["detected"]:
+            continue
+        age = now - b["detect_time"]
+        if age > BLIP_LIFETIME:
+            continue
+        dr, dc = b["dr"], b["dc"]
+        if _in_radius(dr, dc, r_rows, r_cols, limit_r):
+            attr = bright if age < BLIP_LIFETIME * 0.55 else dim
+            _safe_ch(stdscr, cy + dr, cx + dc, "◉", attr, h, w)
+
+
+def _draw_crosshairs(stdscr, cy, cx, r_rows, r_cols, limit_r, h, w, colors):
+    """Targeting crosshairs during lock-on / dissolve."""
+    attr = colors["orange"] | curses.A_BOLD
+
+    # Horizontal bar
+    for dc in range(-r_cols, r_cols + 1):
+        if not _in_radius(0, dc, r_rows, r_cols, limit_r):
+            continue
+        if dc == 0:
+            continue   # centre drawn last
+        _safe_ch(stdscr, cy, cx + dc, "─", attr, h, w)
+
+    # Vertical bar
+    for dr in range(-r_rows, r_rows + 1):
+        if not _in_radius(dr, 0, r_rows, r_cols, limit_r):
+            continue
+        if dr == 0:
+            continue
+        _safe_ch(stdscr, cy + dr, cx, "│", attr, h, w)
+
+    # Corner tick marks at ~60 % radius
+    tick_r = max(1, int(r_rows * 0.60))
+    tick_c = max(2, int(r_cols * 0.60))
+    corners = [
+        (-tick_r, -tick_c, "┌"), (-tick_r, tick_c, "┐"),
+        ( tick_r, -tick_c, "└"), ( tick_r, tick_c, "┘"),
+    ]
+    for dr, dc, ch in corners:
+        if _in_radius(dr, dc, r_rows, r_cols, limit_r):
+            _safe_ch(stdscr, cy + dr, cx + dc, ch, attr, h, w)
+
+    # Centre crosshair intersection
+    if _in_radius(0, 0, r_rows, r_cols, limit_r):
+        _safe_ch(stdscr, cy, cx, "┼", attr, h, w)
+
+
+def _draw_lock_text(stdscr, cy, cx, r_rows, r_cols, limit_r,
+                    label: str, h, w, colors):
+    """Ticker name above centre + ACQUIRED banner below circle."""
+    bright = colors["orange"] | curses.A_BOLD
+
+    # Ticker centred one row above crosshair centre
+    ticker = label.replace("FETCHING", "").strip()
+    if ticker and _in_radius(-1, 0, r_rows, r_cols, limit_r):
+        ts   = f"[ {ticker} ]"
+        tcol = max(0, cx - len(ts) // 2)
+        _safe_str(stdscr, cy - 1, tcol, ts, bright, h, w)
+
+    # Status banner below the circle
+    banner  = "  ◈  SIGNAL ACQUIRED  ◈  "
+    ban_row = cy + r_rows + 1
+    ban_col = max(0, cx - len(banner) // 2)
+    _safe_str(stdscr, ban_row, ban_col, banner, bright, h, w)
+
+
+def _detect_blips(blips: list, prev_angle: float, curr_angle: float) -> None:
+    """Mark any blip whose reveal angle falls between prev and curr sweep angle."""
+    p   = prev_angle % (2 * math.pi)
+    c   = curr_angle % (2 * math.pi)
+    now = time.monotonic()
+    for b in blips:
+        if b["detected"]:
+            continue
+        ra = b["reveal"]
+        hit = (p <= ra <= c) if p <= c else (ra >= p or ra <= c)
+        if hit:
+            b["detected"]    = True
+            b["detect_time"] = now
 
 
 # ---------------------------------------------------------------------------
@@ -119,103 +300,99 @@ def _step(grid: list, rows: int, cols: int) -> list:
 
 def start_crush(cache: dict) -> None:
     """
-    Signal that background data has arrived — begin the crush animation.
-    Safe to call multiple times; only arms the crush on the first call.
+    Signal that background data has arrived — arm the lock-on sequence.
+    Safe to call multiple times; only transitions once from SCAN → LOCK.
     """
-    if cache.get("_bb_crush_frame", -1) < 0:
-        cache["_bb_crush_frame"] = 0
+    if cache.get("_rdr_state") == _SCAN:
+        cache["_rdr_state"]    = _LOCK
+        cache["_rdr_lock_time"] = time.monotonic()
 
 
 def render_loading(stdscr, cache: dict, colors: dict,
                    start_row: int = 5,
                    label: str = "FETCHING DATA") -> bool:
     """
-    Draw Brian's Brain in the pane and advance its state each frame.
+    Render the radar sweep and advance its state machine.
 
     Parameters
     ----------
-    stdscr    : curses subwindow (the `stdscr` received by render())
-    cache     : mutable pane cache — automaton state lives in _bb_* keys
+    stdscr    : curses subwindow passed to the command's render()
+    cache     : mutable pane cache (radar state stored in _rdr_* keys)
     colors    : color dict from init_colors()
-    start_row : first subwindow row used by the automaton
-    label     : text to pulse at the very bottom of the pane
+    start_row : first subwindow row available (rows 0..start_row-1 = tab bar)
+    label     : "FETCHING AAPL" style string; ticker extracted for display
 
-    Returns
-    -------
-    True  — crush animation just completed; caller should flip to content.
-    False — still loading or still crushing.
+    Returns True when the dissolve completes — caller should flip to chart.
     """
-    win_h, win_w = stdscr.getmaxyx()
+    h, w = stdscr.getmaxyx()
 
-    # One row at the bottom is reserved for the pulsing label.
-    rows = max(2, win_h - start_row - 1)
-    cols = max(4, win_w - 1)
+    # (Re-)initialise if first call or window resized
+    if (not cache.get("_rdr_init")
+            or cache.get("_rdr_win_h") != h
+            or cache.get("_rdr_win_w") != w):
+        _init_radar(cache, h, w, start_row)
 
-    # ── (Re-)initialise when dimensions change ─────────────────────────────
-    if (cache.get("_bb_grid") is None
-            or cache.get("_bb_rows") != rows
-            or cache.get("_bb_cols") != cols):
-        cache["_bb_grid"]        = _init_grid(rows, cols)
-        cache["_bb_rows"]        = rows
-        cache["_bb_cols"]        = cols
-        if "_bb_crush_frame" not in cache:
-            cache["_bb_crush_frame"] = -1
+    cy       = cache["_rdr_cy"]
+    cx       = cache["_rdr_cx"]
+    r_rows   = cache["_rdr_r_rows"]
+    r_cols   = cache["_rdr_r_cols"]
+    angle    = cache["_rdr_angle"]
+    trail    = cache["_rdr_trail"]
+    blips    = cache["_rdr_blips"]
+    state    = cache["_rdr_state"]
+    limit_r  = cache["_rdr_dissolve_r"]   # None until dissolve begins
 
-    grid      = cache["_bb_grid"]
-    crush     = cache["_bb_crush_frame"]
-    fire_attr = colors["orange"] | curses.A_BOLD
-    refr_attr = colors["dim"]
+    # ── Always draw: rings + circle ────────────────────────────────────────
+    _draw_rings(stdscr,  cy, cx, r_rows, r_cols, limit_r, h, w, colors)
+    _draw_circle(stdscr, cy, cx, r_rows, r_cols, limit_r, h, w, colors)
 
-    # ── Draw automaton rows ────────────────────────────────────────────────
-    for r in range(rows):
-        scr_row = start_row + r
-        if scr_row >= win_h - 1:
-            break
+    # ── State-specific content ─────────────────────────────────────────────
+    if state == _SCAN:
+        _draw_sweep(stdscr, cy, cx, r_rows, r_cols,
+                    angle, trail, limit_r, h, w, colors)
+        _draw_blips(stdscr, cy, cx, r_rows, r_cols,
+                    blips, limit_r, h, w, colors)
 
-        if crush >= 0 and r < crush:
-            # This row has been crushed — blank it out
-            try:
-                stdscr.addstr(scr_row, 0, " " * min(cols, win_w - 1))
-            except Exception:
-                pass
-            continue
+        # Pulsing status below circle
+        phase  = int(time.monotonic() * 3) % 3
+        dots   = "." * (phase + 1)
+        status = f"  SCANNING{dots:<3}"
+        srow   = cy + r_rows + 1
+        scol   = max(0, cx - len(status) // 2)
+        _safe_str(stdscr, srow, scol, status, colors["dim"], h, w)
 
-        row_data = grid[r]
-        limit    = min(cols, win_w - 1)
-        for c in range(limit):
-            state = row_data[c]
-            if state == _FIRE:
-                try:
-                    stdscr.addch(scr_row, c, _FIRE_CHAR, fire_attr)
-                except Exception:
-                    pass
-            elif state == _REFR:
-                try:
-                    stdscr.addch(scr_row, c, _REFR_CHAR, refr_attr)
-                except Exception:
-                    pass
-            # OFF cells → leave background (blank)
+        # Advance sweep angle and detect blips
+        prev    = angle
+        angle  += SWEEP_SPEED
+        cache["_rdr_angle"] = angle
+        cache["_rdr_trail"] = (trail + [prev])[-TRAIL_LEN:]
+        _detect_blips(blips, prev, angle)
 
-    # ── Pulsing label at the bottom ────────────────────────────────────────
-    label_row = win_h - 1
-    if 0 <= label_row < win_h:
-        phase = int(time.monotonic() * 4) % 4          # 0-3, cycles ~4×/sec
-        dots  = "." * (phase % 3 + 1)                  # 1, 2, or 3 dots
-        text  = f"  {label}{dots:<3}"
-        lattr = (colors["orange"] | curses.A_BOLD) if phase < 2 else colors["dim"]
-        try:
-            stdscr.addstr(label_row, 0, text[: win_w - 1], lattr)
-        except Exception:
-            pass
+    elif state == _LOCK:
+        # Sweep frozen — show crosshairs + lock text
+        _draw_blips(stdscr, cy, cx, r_rows, r_cols,
+                    blips, limit_r, h, w, colors)
+        _draw_crosshairs(stdscr, cy, cx, r_rows, r_cols,
+                         limit_r, h, w, colors)
+        _draw_lock_text(stdscr, cy, cx, r_rows, r_cols,
+                        limit_r, label, h, w, colors)
 
-    # ── Step the automaton (freeze once crush begins) ──────────────────────
-    if crush < 0:
-        cache["_bb_grid"] = _step(grid, rows, cols)
+        elapsed = time.monotonic() - cache["_rdr_lock_time"]
+        if elapsed >= LOCK_HOLD:
+            cache["_rdr_state"]     = _DISSOLVE
+            cache["_rdr_dissolve_r"] = float(r_rows)
 
-    # ── Advance crush ──────────────────────────────────────────────────────
-    if crush >= 0:
-        cache["_bb_crush_frame"] = crush + _CRUSH_SPEED
-        if cache["_bb_crush_frame"] >= rows:
-            return True     # crush complete — caller should render content
+    elif state == _DISSOLVE:
+        # Radar contracts inward; only draw what's within limit_r
+        _draw_blips(stdscr, cy, cx, r_rows, r_cols,
+                    blips, limit_r, h, w, colors)
+        _draw_crosshairs(stdscr, cy, cx, r_rows, r_cols,
+                         limit_r, h, w, colors)
+        _draw_lock_text(stdscr, cy, cx, r_rows, r_cols,
+                        limit_r, label, h, w, colors)
+
+        cache["_rdr_dissolve_r"] = limit_r - DISSOLVE_RATE
+        if cache["_rdr_dissolve_r"] <= 0:
+            return True   # ← dissolve complete; caller switches to chart
 
     return False
