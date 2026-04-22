@@ -39,7 +39,7 @@ import asyncio
 import os
 import sys
 
-import brodberg_session
+import broderick_session
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def _ws_loop(location_key: str, stop_event: threading.Event):
     bbox = [[lat_min, lon_min], [lat_max, lon_max]]
 
     async def _run():
-        server_url = brodberg_session.get_server_url()
+        server_url = broderick_session.get_server_url()
         uri = server_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/ship"
         subscribe_msg = json.dumps({
             "BoundingBoxes":      [bbox],

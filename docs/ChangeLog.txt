@@ -1,9 +1,9 @@
-Current Version: BrodBerg V4.0
+Current Version: Broderick Terminal V4.0
 V4.0
     -User profiles introduced
-    -Restructure to web host. Brodberg can be ran from anywhere.
+    -Restructure to web host. Broderick Terminal can be ran from anywhere.
 V3.0b
-    -Official Brodberg demo launch runs standalone on any machine
+    -Official Broderick Terminal demo launch runs standalone on any machine
     -Active window cycling max 3 windows
     -new and improved navigation see HELP for new navigation controls
 V2.2b

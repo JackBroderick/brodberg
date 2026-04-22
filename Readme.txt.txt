@@ -1,4 +1,4 @@
-# Brodberg Terminal
+# Broderick Terminal
 
 A Bloomberg-style financial terminal built in Python with live market data,
 AIS vessel tracking, online user accounts, and a multi-pane curses UI.
@@ -11,7 +11,7 @@ Runs as a standalone .exe or directly with Python.
 - Live AIS ship tracking at the Strait of Hormuz
 - Online user accounts — register, login, and view profiles
 - Multi-pane layout — run up to 3 commands side by side
-- All market data routed through the Brodberg server (no API keys needed by users)
+- All market data routed through the Broderick Terminal server (no API keys needed by users)
 
 ## Run from source
 
@@ -20,7 +20,7 @@ Runs as a standalone .exe or directly with Python.
 
 ## Build .exe
 
-  pyinstaller --onefile --icon=brodberg_icon.ico --add-data "data;data" --add-data "docs;docs" --add-data "brodberg_icon.ico;." --name Brodberg main.py
+  pyinstaller --onefile --icon=broderick_icon.ico --add-data "data;data" --add-data "docs;docs" --add-data "broderick_icon.ico;." --name "Broderick Terminal" main.py
 
 ## Commands
 
@@ -71,7 +71,7 @@ Runs as a standalone .exe or directly with Python.
   BrodBerg/
   ├── main.py                  Entry point and curses loop
   ├── market_data.py           server_get() helper + benchmark/news threads
-  ├── brodberg_session.py      Local session management (~/.brodberg/session.json)
+  ├── broderick_session.py     Local session management (~/.broderick/session.json)
   ├── chart.py                 Price chart rendering
   ├── ship_data.py             AIS WebSocket client
   ├── requirements.txt         Client dependencies

@@ -25,7 +25,7 @@ import market_data
 
 def _fetch_profile(ticker: str) -> dict:
     """
-    Fetch company profile via the Brodberg server proxy.
+    Fetch company profile via the Broderick Terminal server proxy.
     Returns the raw JSON dict or raises on failure.
     """
     return market_data.server_get(f"/api/company/{ticker.upper()}")

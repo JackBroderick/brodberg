@@ -31,7 +31,7 @@ import datetime
 def draw_header(stdscr, width: int, now: datetime.datetime, colors: dict) -> None:
     """Draw the full-width header bar on row 0."""
     formatted_time = now.strftime("%A, %d %B %Y, %I:%M:%S %p")
-    content   = f"BRODBERG TERMINAL Beta V 4.0 |  {formatted_time}"
+    content   = f"BRODERICK TERMINAL Beta V 4.0 |  {formatted_time}"
     full_text = content.center(width - 1)
     stdscr.attron(colors["header"])
     stdscr.addstr(0, 0, full_text[: width - 1])

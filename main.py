@@ -1,7 +1,7 @@
 """
 main.py
 -------
-Brodberg Terminal — entry point and main curses loop.
+Broderick Terminal — entry point and main curses loop.
 
 This file should stay clean. It only handles:
   - Terminal setup / color init
@@ -55,7 +55,7 @@ from ui.chrome import (
 from commands.registry import process_command, dispatch_render, dispatch_keypress
 
 if sys.platform == "win32":
-    ctypes.windll.kernel32.SetConsoleTitleW("Brodberg Terminal")
+    ctypes.windll.kernel32.SetConsoleTitleW("Broderick Terminal")
 
 MAX_PANES  = 3
 PROMPT     = " Command > "
@@ -298,5 +298,5 @@ def main(stdscr):
 # Entry point
 # ---------------------------------------------------------------------------
 
-_set_console_icon("brodberg_icon.ico")
+_set_console_icon("broderick_icon.ico")
 curses.wrapper(main)

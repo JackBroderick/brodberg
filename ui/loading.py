@@ -1,7 +1,7 @@
 """
 ui/loading.py
 -------------
-Radar sweep loading screen for Brodberg.
+Radar sweep loading screen for Broderick Terminal.
 
 A circular radar dish rotates a sweep arm and picks up random signal blips.
 When data arrives (start_crush called), the arm freezes, crosshairs lock onto

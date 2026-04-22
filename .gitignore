@@ -22,7 +22,7 @@ dist/
 *.sqlite3
 
 # Local session / config
-.brodberg/
+.broderick/
 
 # Logs
 *.log

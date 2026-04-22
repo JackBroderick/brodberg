@@ -20,10 +20,10 @@ import time
 
 
 def server_get(path: str, params: dict = None) -> dict:
-    """GET request to the Brodberg server. Used by all commands that need market data."""
+    """GET request to the Broderick Terminal server. Used by all commands that need market data."""
     import requests
-    import brodberg_session
-    url = f"{brodberg_session.get_server_url()}{path}"
+    import broderick_session
+    url = f"{broderick_session.get_server_url()}{path}"
     r   = requests.get(url, params=params, timeout=10)
     r.raise_for_status()
     return r.json()
@@ -54,12 +54,12 @@ NEWS_SCROLL_SPEED          = 2     # columns to advance per 100 ms tick
 # ---------------------------------------------------------------------------
 
 def _fetch_raw_quote(symbol):
-    """Fetch a quote via the Brodberg server proxy. Returns raw JSON dict."""
+    """Fetch a quote via the Broderick Terminal server proxy. Returns raw JSON dict."""
     return server_get(f"/api/quote/{symbol.upper()}")
 
 
 def _fetch_raw_news():
-    """Fetch market news via the Brodberg server proxy. Returns list of article dicts."""
+    """Fetch market news via the Broderick Terminal server proxy. Returns list of article dicts."""
     return server_get("/api/news")
 
 

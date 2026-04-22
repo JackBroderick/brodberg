@@ -22,7 +22,7 @@ import curses
 import re
 from datetime import datetime, timezone
 
-import brodberg_session
+import broderick_session
 import chat_data
 import market_data
 
@@ -143,7 +143,7 @@ def _fmt_ts(ts: str) -> str:
 # ---------------------------------------------------------------------------
 
 def fetch(parts: list) -> dict:
-    if not brodberg_session.is_logged_in():
+    if not broderick_session.is_logged_in():
         return {
             "error":    "Not logged in.  Use  USER login  first.",
             "form_mode": False,
@@ -154,7 +154,7 @@ def fetch(parts: list) -> dict:
             "me":       None,
         }
 
-    me     = brodberg_session.get_current_user()
+    me     = broderick_session.get_current_user()
     rooms  = ["general", "biotech", "smallcap", "support", "random"]
     active = 0
 
@@ -177,7 +177,7 @@ def fetch(parts: list) -> dict:
         "error":       None,
         "form_mode":   True,
         "me":          me,
-        "is_admin":    brodberg_session.get_is_admin(),
+        "is_admin":    broderick_session.get_is_admin(),
         "rooms":       rooms,
         "active_room": active,
         "compose":     "",

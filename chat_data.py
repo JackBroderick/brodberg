@@ -25,7 +25,7 @@ import json
 import threading
 import asyncio
 
-import brodberg_session
+import broderick_session
 
 # ---------------------------------------------------------------------------
 # Per-room message store
@@ -112,11 +112,11 @@ def join_room(room: str) -> None:
 def fetch_dm_threads() -> list:
     """HTTP fetch of all DM rooms the current user has participated in."""
     import requests
-    token = brodberg_session.get_token()
+    token = broderick_session.get_token()
     if not token:
         return []
     try:
-        url = f"{brodberg_session.get_server_url()}/api/chat/dm-threads"
+        url = f"{broderick_session.get_server_url()}/api/chat/dm-threads"
         r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         r.raise_for_status()
         return r.json().get("rooms", [])
@@ -148,7 +148,7 @@ async def _run(token: str, initial_rooms: list, stop_event: threading.Event) -> 
         _set_status("error: pip install websockets")
         return
 
-    server_url = brodberg_session.get_server_url()
+    server_url = broderick_session.get_server_url()
     uri = (server_url
            .replace("https://", "wss://")
            .replace("http://",  "ws://")) + "/api/chat"
@@ -275,8 +275,8 @@ def connect(initial_rooms: list | None = None) -> None:
     """
     global _loop, _thread, _stop, _connected_user
 
-    token = brodberg_session.get_token()
-    me    = brodberg_session.get_current_user()
+    token = broderick_session.get_token()
+    me    = broderick_session.get_current_user()
 
     if not token or not me:
         _set_status("error: not logged in")

@@ -1,9 +1,9 @@
 """
-brodberg_session.py
+broderick_session.py
 -------------------
-Manages the local login session for Brodberg.
+Manages the local login session for Broderick Terminal.
 
-Session is stored at  ~/.brodberg/session.json  and contains:
+Session is stored at  ~/.broderick/session.json  and contains:
   {
     "username": "alice",
     "token":    "eyJ..."
@@ -28,7 +28,7 @@ Public API:
 import json
 import os
 
-_SESSION_DIR  = os.path.join(os.path.expanduser("~"), ".brodberg")
+_SESSION_DIR  = os.path.join(os.path.expanduser("~"), ".broderick")
 _SESSION_FILE = os.path.join(_SESSION_DIR, "session.json")
 
 _DEFAULT_SERVER = "https://brodberg.onrender.com"
@@ -95,5 +95,3 @@ def get_is_admin() -> bool:
 
 def get_server_url() -> str:
     return load_session().get("server_url", _DEFAULT_SERVER).rstrip("/")
-
-

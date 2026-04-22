@@ -1,7 +1,7 @@
 """
 commands/registry.py
 --------------------
-Central command router for the Brodberg Terminal.
+Central command router for the Broderick Terminal.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   HOW TO REGISTER A NEW COMMAND

@@ -1,7 +1,7 @@
 """
 server/main.py
 --------------
-Brodberg online server — user accounts, profiles, and API proxy.
+Broderick Terminal online server — user accounts, profiles, and API proxy.
 
 User account endpoints:
   POST /register            — create a new account
@@ -21,11 +21,11 @@ Market data proxy endpoints (keys live here — clients send no keys):
   WS   /api/ship              — AISStream WebSocket proxy
 
 Environment variables:
-  BRODBERG_SECRET       — JWT signing key  (required in production)
+  BRODERICK_SECRET      — JWT signing key  (required in production)
   DATABASE_URL          — PostgreSQL URL   (set automatically by Render)
   FINNHUB_API_KEY       — Finnhub API key
   AISSTREAM_API_KEY     — AISStream API key
-  BRODBERG_DB           — SQLite path      (local dev only)
+  BRODERICK_DB          — SQLite path      (local dev only)
 """
 
 import os
@@ -50,11 +50,11 @@ from pydantic import BaseModel
 # Config
 # ---------------------------------------------------------------------------
 
-SECRET_KEY    = os.environ.get("BRODBERG_SECRET", "change-me-before-deploying")
+SECRET_KEY    = os.environ.get("BRODERICK_SECRET", "change-me-before-deploying")
 TOKEN_SECONDS = 60 * 60 * 24 * 30
 _HERE         = os.path.dirname(os.path.abspath(__file__))
 _DATABASE_URL = os.environ.get("DATABASE_URL")
-_SQLITE_PATH  = os.environ.get("BRODBERG_DB", os.path.join(_HERE, "brodberg.db"))
+_SQLITE_PATH  = os.environ.get("BRODERICK_DB", os.path.join(_HERE, "broderick.db"))
 
 FINNHUB_KEY   = os.environ.get("FINNHUB_API_KEY", "")
 AISSTREAM_KEY = os.environ.get("AISSTREAM_API_KEY", "")
@@ -986,7 +986,7 @@ async def lifespan(app: FastAPI):
         _pool.closeall()
 
 
-app       = FastAPI(title="Brodberg Server", version="1.0.0", lifespan=lifespan)
+app       = FastAPI(title="Broderick Terminal Server", version="1.0.0", lifespan=lifespan)
 _security = HTTPBearer(auto_error=False)
 
 def _current_user(creds: HTTPAuthorizationCredentials = Depends(_security)) -> str:

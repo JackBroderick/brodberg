@@ -1,2 +1,2 @@
 @echo off
-cmd.exe /k "Brodberg Terminal.exe"
+cmd.exe /k "Broderick Terminal.exe"

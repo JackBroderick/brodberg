@@ -25,7 +25,7 @@ on_keypress(key, cache)       -> cache dict
 
 import curses
 import requests
-import brodberg_session
+import broderick_session
 
 TIMEOUT = 35
 
@@ -34,10 +34,10 @@ TIMEOUT = 35
 # ---------------------------------------------------------------------------
 
 def _url(path: str) -> str:
-    return f"{brodberg_session.get_server_url()}{path}"
+    return f"{broderick_session.get_server_url()}{path}"
 
 def _auth_headers() -> dict:
-    token = brodberg_session.get_token()
+    token = broderick_session.get_token()
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 def _form(action: str, fields: list, message: str = "", status=None) -> dict:
@@ -76,7 +76,7 @@ def fetch(parts: list) -> dict:
 
     # ── USER dir ──────────────────────────────────────────────────────────
     if action == "DIR":
-        if not brodberg_session.is_logged_in():
+        if not broderick_session.is_logged_in():
             return _result("DIR", "Not logged in.  Use  USER login  first.", "error")
         try:
             r = requests.get(_url("/api/users"), headers=_auth_headers(), timeout=TIMEOUT)
@@ -112,15 +112,15 @@ def fetch(parts: list) -> dict:
 
     # ── USER logout ───────────────────────────────────────────────────────
     if action == "LOGOUT":
-        if not brodberg_session.is_logged_in():
+        if not broderick_session.is_logged_in():
             return _result("LOGOUT", "You are not logged in.", "error")
-        who = brodberg_session.get_current_user()
-        brodberg_session.clear_session()
+        who = broderick_session.get_current_user()
+        broderick_session.clear_session()
         return _result("LOGOUT", f"Logged out.  Goodbye, {who}.", "ok")
 
     # ── USER edit ─────────────────────────────────────────────────────────
     if action == "EDIT":
-        if not brodberg_session.is_logged_in():
+        if not broderick_session.is_logged_in():
             return _result("EDIT", "Not logged in.  Use  USER login.", "error")
         try:
             r    = requests.get(_url("/me"), headers=_auth_headers(), timeout=TIMEOUT)
@@ -146,7 +146,7 @@ def fetch(parts: list) -> dict:
             return _result("PROFILE", str(e), "error")
 
     # ── USER (no args) — show own profile or prompt ───────────────────────
-    if not brodberg_session.is_logged_in():
+    if not broderick_session.is_logged_in():
         return _result("HOME", "Not logged in.  Use  USER login  or  USER register.", "error")
     try:
         r    = requests.get(_url("/me"), headers=_auth_headers(), timeout=TIMEOUT)
@@ -177,14 +177,14 @@ def _submit(cache: dict) -> dict:
                               timeout=TIMEOUT)
             data = r.json()
             if r.status_code == 200:
-                brodberg_session.save_session({"username": data["username"],
+                broderick_session.save_session({"username": data["username"],
                                                "token":    data["token"]})
                 pr   = requests.get(_url("/me"),
                                     headers={"Authorization": f"Bearer {data['token']}"},
                                     timeout=TIMEOUT)
                 user = pr.json() if pr.status_code == 200 else None
                 if user:
-                    brodberg_session.save_session({"is_admin": bool(user.get("is_admin", False))})
+                    broderick_session.save_session({"is_admin": bool(user.get("is_admin", False))})
                 return _result("LOGIN", f"Welcome back, {data['username']}.", "ok", user=user)
             return {**cache, "status": "error", "message": data.get("detail", "Login failed.")}
         except Exception as e:
@@ -217,7 +217,7 @@ def _submit(cache: dict) -> dict:
                              timeout=TIMEOUT)
             if r.status_code == 200:
                 return _result("EDIT", "Profile updated.", "ok",
-                               user={"username": brodberg_session.get_current_user(),
+                               user={"username": broderick_session.get_current_user(),
                                      "created_at": "",
                                      "bio":      bio,
                                      "location": location})
@@ -344,7 +344,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
             _put(stdscr, r, 2, "USER DIRECTORY  ›  PROFILE", colors["orange"], bold=True); r += 1
             _put(stdscr, r, 0, sep, colors["dim"]); r += 1
 
-            is_me    = (du.get("username") == brodberg_session.get_current_user())
+            is_me    = (du.get("username") == broderick_session.get_current_user())
             is_admin = bool(du.get("is_admin", False))
             label    = "YOUR PROFILE" if is_me else du.get("username", "").upper()
             if is_admin:
@@ -432,7 +432,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         return
 
     TITLES = {
-        "LOGIN":    "LOGIN TO BRODBERG",
+        "LOGIN":    "LOGIN TO BRODERICK TERMINAL",
         "REGISTER": "CREATE AN ACCOUNT",
         "EDIT":     "EDIT PROFILE",
         "LOGOUT":   "SIGN OUT",
@@ -484,7 +484,7 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         r += 2
 
     if user:
-        is_me    = (user.get("username") == brodberg_session.get_current_user())
+        is_me    = (user.get("username") == broderick_session.get_current_user())
         is_admin = bool(user.get("is_admin", False))
         label    = "YOUR PROFILE" if is_me else user.get("username", "").upper()
         if is_admin:
