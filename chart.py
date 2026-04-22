@@ -158,7 +158,7 @@ def render_gip(stdscr, gip_cache: dict, colors: dict) -> None:
         except Exception:
             pass
 
-    r = 4
+    r = 5
     put(r,     0, separator,                                                     colors["dim"])
     timeframe = d.get("timeframe", "")
     tf_label  = {

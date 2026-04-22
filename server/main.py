@@ -393,10 +393,6 @@ async def _scrape_unusual_options() -> dict:
 
         # Step 2 — call Barchart's internal JSON API using their exact filter params
         # (reverse-engineered from browser Network tab on /options/unusual-activity/stocks)
-        from datetime import date as _date2, timedelta
-        today_s     = _date.today().strftime("%Y-%m-%d")
-        yesterday_s = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-
         _TARGET  = 500   # rows we want total
         _PG_SIZE = 100   # rows per API request
 
@@ -409,7 +405,6 @@ async def _scrape_unusual_options() -> dict:
             "&baseSymbolTypes=stock"
             "&between(volumeOpenInterestRatio,1.24,)="
             "&between(lastPrice,.10,)="
-            f"&between(tradeTime,{yesterday_s},{today_s})="
             "&between(volume,500,)="
             "&between(openInterest,100,)="
             "&in(exchange,(AMEX,NYSE,NASDAQ,INDEX-CBOE))="
