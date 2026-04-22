@@ -167,6 +167,7 @@ def render_gip(stdscr, gip_cache: dict, colors: dict) -> None:
         "3M":  "3-Month",
         "1Y":  "1-Year",
         "YTD": "Year-to-Date",
+        "ALL": "All-Time",
     }.get(timeframe, timeframe)
     put(r + 1, 0, f"   {symbol}  —  {tf_label} Price Trend",                       colors["orange"], bold=True)
     put(r + 2, 0, f"   ${prices[-1]:.2f}   {sign}{price_change:.2f} ({sign}{pct_change:.2f}%)",

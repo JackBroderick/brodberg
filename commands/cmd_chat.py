@@ -37,6 +37,25 @@ _TICKER_RE = re.compile(r'(\$[A-Za-z]{1,6})')
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _word_wrap(text, max_width):
+    """
+    Split text into a list of lines each at most max_width chars,
+    breaking at the last space within the limit (word wrap).
+    Falls back to a hard break if no space is found.
+    """
+    if max_width <= 0:
+        return [text] if text else [""]
+    lines = []
+    while len(text) > max_width:
+        break_at = text.rfind(" ", 0, max_width)
+        if break_at <= 0:
+            break_at = max_width      # no space — hard break
+        lines.append(text[:break_at])
+        text = text[break_at:].lstrip(" ")
+    lines.append(text)
+    return lines
+
+
 def _render_message_text(stdscr, row, col, text, max_width, base_color, colors):
     """
     Render a chat message, highlighting $TICKER tokens with live price change colors.
@@ -102,12 +121,20 @@ def _put(stdscr, row, col, text, color, bold=False):
 
 
 def _fmt_ts(ts: str) -> str:
-    """Convert an ISO UTC timestamp to local HH:MM.  Falls back gracefully."""
+    """
+    Format a UTC ISO timestamp for display in the chat timestamp column (5 chars).
+      Today      -> HH:MM  (local time)
+      Other day  -> MM/DD
+    Falls back gracefully on bad input.
+    """
     if not ts:
         return "     "
     try:
-        dt = datetime.fromisoformat(ts)          # parses "2026-04-13T20:45:37+00:00"
-        return dt.astimezone().strftime("%H:%M")  # system local time
+        dt    = datetime.fromisoformat(ts).astimezone()   # convert to local time
+        today = datetime.now().date()
+        if dt.date() == today:
+            return dt.strftime("%H:%M")
+        return dt.strftime("%m/%d")
     except (ValueError, TypeError):
         return f"{ts[:5]:>5}"                     # old "HH:MM" rows — display as-is
 
@@ -186,7 +213,9 @@ def on_keypress(key: int, cache: dict) -> dict:
 
     # ↑ — scroll up (older messages)
     if key == curses.KEY_UP:
-        total     = len(chat_data.get_messages(rooms[active_room]))
+        # Use pre-computed display row count (wrapping-aware) when available
+        total      = cache.get("_display_row_count",
+                               len(chat_data.get_messages(rooms[active_room])))
         max_scroll = max(0, total - 1)
         return {**cache, "scroll": min(scroll + 1, max_scroll)}
 
@@ -319,52 +348,72 @@ def render(stdscr, cache: dict, colors: dict) -> None:
         return   # terminal too small
 
     # ── Messages ──────────────────────────────────────────────────────────
-    msgs   = chat_data.get_messages(room)
-    total  = len(msgs)
-
-    # Clamp scroll
-    max_scroll = max(0, total - msg_area_rows)
-    scroll     = min(scroll, max_scroll)
-
-    end_idx   = max(0, total - scroll)
-    start_idx = max(0, end_idx - msg_area_rows)
-    visible   = msgs[start_idx:end_idx]
-
+    msgs     = chat_data.get_messages(room)
     name_w   = 14   # wide enough for "jackbroderick" (13) + 1
     # Layout: col 2 = timestamp (5), col 9 = name (name_w) + ":", col 9+name_w+2 = text
-    text_col = 9 + name_w + 2   # +1 colon +1 space
+    text_col = 9 + name_w + 2
+    max_text = max(1, width - text_col - 1)
 
-    for i, msg in enumerate(visible):
-        row    = msg_area_top + i
+    # Build a flat list of wrapped display rows across all messages.
+    # Each entry: (msg_dict, line_text, is_first_line)
+    display_rows = []
+    for msg in msgs:
         sender = msg.get("from", "")
         text   = msg.get("text", "")
+        is_sys = (sender == "system")
+
+        if is_sys:
+            sys_max  = max(1, width - text_col - 1)
+            for j, line in enumerate(_word_wrap(text, sys_max)):
+                display_rows.append((msg, line, j == 0))
+        else:
+            for j, line in enumerate(_word_wrap(text, max_text)):
+                display_rows.append((msg, line, j == 0))
+
+    # Cache the total so on_keypress can clamp scroll correctly
+    total_display = len(display_rows)
+    cache["_display_row_count"] = total_display
+
+    # Clamp scroll to available display rows
+    max_scroll = max(0, total_display - msg_area_rows)
+    scroll     = min(scroll, max_scroll)
+
+    end_idx      = max(0, total_display - scroll)
+    start_idx    = max(0, end_idx - msg_area_rows)
+    visible_rows = display_rows[start_idx:end_idx]
+
+    for i, (msg, line_text, is_first) in enumerate(visible_rows):
+        row    = msg_area_top + i
+        sender = msg.get("from", "")
         ts     = msg.get("ts", "")
         is_me  = (sender == me)
         is_sys = (sender == "system")
 
         if is_sys:
             indent = " " * text_col
-            _put(stdscr, row, 0, (indent + text)[:width - 1], colors["dim"])
+            _put(stdscr, row, 0, (indent + line_text)[:width - 1], colors["dim"])
             continue
 
         is_admin_sender = msg.get("admin", False)
-        ts_str   = _fmt_ts(ts)
-        name_str = sender[:name_w].rjust(name_w)
+        base_color      = colors["orange"] if is_me else colors["dim"]
 
-        _put(stdscr, row, 2, ts_str, colors["dim"])
-        # Admin marker sits in the gap at col 8 — name field stays full width
-        if is_admin_sender:
-            _put(stdscr, row, 8, "♠", colors["orange"], bold=True)
-        name_color = colors["orange"] if (is_me or is_admin_sender) else colors["dim"]
-        _put(stdscr, row, 9, name_str + ":", name_color, bold=(is_me or is_admin_sender))
+        if is_first:
+            ts_str   = _fmt_ts(ts)
+            name_str = sender[:name_w].rjust(name_w)
+            _put(stdscr, row, 2, ts_str, colors["dim"])
+            if is_admin_sender:
+                _put(stdscr, row, 8, "♠", colors["orange"], bold=True)
+            name_color = colors["orange"] if (is_me or is_admin_sender) else colors["dim"]
+            _put(stdscr, row, 9, name_str + ":", name_color,
+                 bold=(is_me or is_admin_sender))
+        # else: continuation line — timestamp and name left blank (aligned indent)
 
-        max_text   = max(0, width - text_col - 1)
-        base_color = colors["orange"] if is_me else colors["dim"]
-        _render_message_text(stdscr, row, text_col, text, max_text, base_color, colors)
+        _render_message_text(stdscr, row, text_col, line_text, max_text,
+                             base_color, colors)
 
     # ── Scroll indicator ──────────────────────────────────────────────────
-    if total > msg_area_rows and scroll > 0:
-        ind = f"  ↑ {scroll} more above"
+    if total_display > msg_area_rows and scroll > 0:
+        ind = f"  ^ {scroll} rows above"
         _put(stdscr, msg_area_top, width - len(ind) - 2, ind, colors["dim"])
 
     # ── Compose area ──────────────────────────────────────────────────────

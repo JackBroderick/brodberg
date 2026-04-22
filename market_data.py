@@ -108,6 +108,7 @@ TIMEFRAME_MAP = {
     "3M":  ("3mo",  "1d"),
     "1Y":  ("1y",   "1wk"),
     "YTD": ("ytd",  "1d"),
+    "ALL": ("max",  "1mo"),
 }
 DEFAULT_TIMEFRAME = "1Y"
 VALID_TIMEFRAMES  = list(TIMEFRAME_MAP.keys())
