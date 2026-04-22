@@ -68,8 +68,33 @@ def _result(action: str, message: str, status: str, user=None) -> dict:
 # fetch — called once when the user presses Enter in the command bar
 # ---------------------------------------------------------------------------
 
+_DIR_VISIBLE = 18   # rows shown at once in USER DIR list
+
+
 def fetch(parts: list) -> dict:
     action = parts[1].upper() if len(parts) > 1 else ""
+
+    # ── USER dir ──────────────────────────────────────────────────────────
+    if action == "DIR":
+        if not brodberg_session.is_logged_in():
+            return _result("DIR", "Not logged in.  Use  USER login  first.", "error")
+        try:
+            r = requests.get(_url("/api/users"), headers=_auth_headers(), timeout=TIMEOUT)
+            if r.status_code == 200:
+                users = r.json().get("users", [])
+                return {
+                    "action":      "DIR",
+                    "form_mode":   False,
+                    "users":       users,
+                    "selected":    0,
+                    "page_offset": 0,
+                    "view":        "list",
+                    "detail_user": None,
+                    "error":       None,
+                }
+            return _result("DIR", r.json().get("detail", "Could not fetch directory."), "error")
+        except Exception as e:
+            return _result("DIR", str(e), "error")
 
     # ── USER login ────────────────────────────────────────────────────────
     if action == "LOGIN":
@@ -209,6 +234,38 @@ def _submit(cache: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def on_keypress(key: int, cache: dict) -> dict:
+    # ── DIR navigation ────────────────────────────────────────────────────
+    if cache.get("action") == "DIR":
+        view = cache.get("view", "list")
+
+        if view == "detail":
+            return {**cache, "view": "list"}   # any key returns to list
+
+        # list view
+        users = cache.get("users", [])
+        n     = len(users)
+        sel   = cache.get("selected", 0)
+        off   = cache.get("page_offset", 0)
+
+        if key == curses.KEY_UP:
+            new_sel = max(0, sel - 1)
+            return {**cache, "selected": new_sel,
+                    "page_offset": min(off, new_sel)}
+
+        if key == curses.KEY_DOWN:
+            if n == 0:
+                return cache
+            new_sel = min(n - 1, sel + 1)
+            new_off = off if new_sel < off + _DIR_VISIBLE else new_sel - _DIR_VISIBLE + 1
+            return {**cache, "selected": new_sel, "page_offset": new_off}
+
+        if key in (curses.KEY_ENTER, 10, 13):
+            if 0 <= sel < n:
+                return {**cache, "view": "detail", "detail_user": users[sel]}
+
+        return cache
+
+    # ── Form-mode handling (login / register / edit) ──────────────────────
     if not cache.get("form_mode"):
         return cache
 
@@ -268,6 +325,111 @@ def render(stdscr, cache: dict, colors: dict) -> None:
     sep   = f"  {'─' * min(50, width - 4)}"
     box_w = max(24, min(52, width - 8))   # total box width  ┌──...──┐
     inner = box_w - 4                      # usable chars inside  │ ... │
+
+    # ── USER DIR ──────────────────────────────────────────────────────────
+    if action == "DIR":
+        r = 4
+        _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+
+        if cache.get("error"):
+            _put(stdscr, r, 2, "USER DIRECTORY", colors["orange"], bold=True); r += 1
+            _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+            _put(stdscr, r, 2, cache["error"], colors["negative"])
+            return
+
+        view = cache.get("view", "list")
+
+        if view == "detail":
+            du = cache.get("detail_user") or {}
+            _put(stdscr, r, 2, "USER DIRECTORY  ›  PROFILE", colors["orange"], bold=True); r += 1
+            _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+
+            is_me    = (du.get("username") == brodberg_session.get_current_user())
+            is_admin = bool(du.get("is_admin", False))
+            label    = "YOUR PROFILE" if is_me else du.get("username", "").upper()
+            if is_admin:
+                label += "  ♠"
+            _put(stdscr, r, 2, label, colors["orange"], bold=True); r += 1
+            _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+
+            def dv(lbl, val):
+                nonlocal r
+                _put(stdscr, r, 4, f"{lbl:<16}", colors["dim"])
+                _put(stdscr, r, 20, val or "—", colors["orange"])
+                r += 1
+
+            uname_display = du.get("username", "")
+            if is_admin:
+                uname_display += "  ♠  Admin"
+            dv("Username",     uname_display)
+            dv("Member since", du.get("created_at", ""))
+            dv("Location",     du.get("location",   ""))
+            dv("Bio",          du.get("bio",        ""))
+            r += 1
+            _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+            _put(stdscr, r, 2, "Any key  back to directory", colors["dim"])
+            return
+
+        # list view
+        users = cache.get("users", [])
+        total = len(users)
+        sel   = cache.get("selected", 0)
+        off   = cache.get("page_offset", 0)
+
+        count_str = f"{total} user{'s' if total != 1 else ''}"
+        _put(stdscr, r, 2, "USER DIRECTORY", colors["orange"], bold=True)
+        _put(stdscr, r, 18, count_str, colors["dim"])
+        r += 1
+        _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+
+        # column headers
+        C_USER   = 2
+        C_JOINED = 20
+        C_LOC    = 33
+        C_BIO    = 55
+        _put(stdscr, r, C_USER,   f"{'USERNAME':<17}", colors["dim"], bold=True)
+        _put(stdscr, r, C_JOINED, f"{'JOINED':<12}",   colors["dim"], bold=True)
+        _put(stdscr, r, C_LOC,    f"{'LOCATION':<21}", colors["dim"], bold=True)
+        if width > C_BIO + 4:
+            _put(stdscr, r, C_BIO, "BIO", colors["dim"], bold=True)
+        r += 1
+        _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+
+        if not users:
+            _put(stdscr, r, 2, "No users found.", colors["dim"])
+            return
+
+        visible = users[off: off + _DIR_VISIBLE]
+        for i, u in enumerate(visible):
+            abs_idx  = off + i
+            is_sel   = abs_idx == sel
+            is_admin = bool(u.get("is_admin", False))
+            uname    = u.get("username", "")
+            if is_admin:
+                uname += " ♠"
+            joined = (u.get("created_at") or "")[:10]
+            loc    = (u.get("location") or "—")[:20]
+            bio    = (u.get("bio") or "—")[: max(1, width - C_BIO - 2)]
+
+            col = colors["orange"] if is_sel else colors["dim"]
+            bld = is_sel
+            _put(stdscr, r, C_USER,   f"{uname:<17}", col, bold=bld)
+            _put(stdscr, r, C_JOINED, f"{joined:<12}", col, bold=bld)
+            _put(stdscr, r, C_LOC,    f"{loc:<21}",   col, bold=bld)
+            if width > C_BIO + 4:
+                _put(stdscr, r, C_BIO, bio, col, bold=bld)
+            r += 1
+
+        _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+        if total > _DIR_VISIBLE:
+            shown_end = min(off + _DIR_VISIBLE, total)
+            _put(stdscr, r, 2,
+                 f"Showing {off + 1}–{shown_end} of {total}   "
+                 f"↑ ↓ navigate   Enter view profile",
+                 colors["dim"])
+        else:
+            _put(stdscr, r, 2, "↑ ↓ navigate   Enter view profile", colors["dim"])
+        return
 
     TITLES = {
         "LOGIN":    "LOGIN TO BRODBERG",

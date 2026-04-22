@@ -1092,6 +1092,17 @@ def update_me(req: UpdateProfileRequest, username: str = Depends(_current_user))
     return {"message": "Profile updated."}
 
 
+@app.get("/api/users")
+def list_users(username: str = Depends(_current_user)):
+    """Return all registered users for the USER DIR directory."""
+    with _db_conn() as conn:
+        cur = _execute(conn,
+            "SELECT username, created_at, bio, location, is_admin FROM users ORDER BY username",
+            ())
+        rows = cur.fetchall()
+    return {"users": [dict(r) for r in rows]}
+
+
 @app.get("/api/chat/dm-threads")
 def get_dm_threads(username: str = Depends(_current_user)):
     """Return all DM rooms the logged-in user has participated in."""
