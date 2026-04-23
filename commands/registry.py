@@ -66,6 +66,7 @@ from commands import cmd_uo
 from commands import cmd_earn
 from commands import cmd_omon
 from commands import cmd_chat
+from commands import cmd_watch
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -223,6 +224,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_chat.fetch,
         "render":      cmd_chat.render,
         "on_keypress": cmd_chat.on_keypress,
+    },
+    # ── Watchlist ─────────────────────────────────────────────────────────
+    {
+        "prefix":      "WATCH",
+        "exact":       True,
+        "fetch":       cmd_watch.fetch,
+        "render":      cmd_watch.render,
+        "on_keypress": cmd_watch.on_keypress,
     },
 ]
 

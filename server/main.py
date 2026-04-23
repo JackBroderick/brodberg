@@ -294,6 +294,16 @@ def _init_db() -> None:
             """)
             _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages (room, id)")
 
+        # Watchlist — same schema for both DBs
+        _execute(conn, """
+            CREATE TABLE IF NOT EXISTS watchlist (
+                username TEXT NOT NULL,
+                ticker   TEXT NOT NULL,
+                added_at TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (username, ticker)
+            )
+        """)
+
         # Migrations — add admin/moderation columns if they don't exist yet
         for col in ("is_admin", "is_muted", "is_banned"):
             try:
@@ -1010,6 +1020,9 @@ class UpdateProfileRequest(BaseModel):
     bio:      str = ""
     location: str = ""
 
+class WatchlistAddRequest(BaseModel):
+    ticker: str
+
 # ---------------------------------------------------------------------------
 # User account routes
 # ---------------------------------------------------------------------------
@@ -1114,6 +1127,93 @@ def get_dm_threads(username: str = Depends(_current_user)):
             (f"dm:{username}:%", f"dm:%:{username}"))
         rows = cur.fetchall()
     return {"rooms": [row["room"] for row in rows]}
+
+# ---------------------------------------------------------------------------
+# Watchlist routes
+# ---------------------------------------------------------------------------
+
+@app.get("/watchlist")
+async def get_watchlist(username: str = Depends(_current_user)):
+    with _db_conn() as conn:
+        cur = _execute(conn,
+            "SELECT ticker FROM watchlist WHERE username = ? ORDER BY added_at, ticker",
+            (username,))
+        rows = cur.fetchall()
+    tickers = [row["ticker"] for row in rows]
+    if not tickers:
+        return {"watchlist": []}
+
+    async def _fetch_quote(ticker):
+        key = f"quote:{ticker}"
+        cached = _cache_get(key)
+        if cached is not None:
+            return {"ticker": ticker, "quote": cached}
+        try:
+            r = await _http_client.get(
+                f"{FH_BASE}/quote",
+                params={"symbol": ticker, "token": FINNHUB_KEY},
+                timeout=httpx.Timeout(5.0),
+            )
+            data = r.json()
+            _cache_set(key, data, _TTL_QUOTE)
+            return {"ticker": ticker, "quote": data}
+        except Exception:
+            return {"ticker": ticker, "quote": {}}
+
+    results = await asyncio.gather(*[_fetch_quote(t) for t in tickers])
+    return {"watchlist": list(results)}
+
+
+@app.post("/watchlist", status_code=201)
+async def add_to_watchlist(body: WatchlistAddRequest, username: str = Depends(_current_user)):
+    ticker = body.ticker.strip().upper()
+    if not ticker or len(ticker) > 10:
+        raise HTTPException(status_code=400, detail="Invalid ticker.")
+
+    with _db_conn() as conn:
+        cur = _execute(conn,
+            "SELECT COUNT(*) as cnt FROM watchlist WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if (row["cnt"] if row else 0) >= 25:
+            raise HTTPException(status_code=400, detail="Watchlist full — max 25 tickers.")
+        cur = _execute(conn,
+            "SELECT ticker FROM watchlist WHERE username = ? AND ticker = ?",
+            (username, ticker))
+        if cur.fetchone():
+            raise HTTPException(status_code=400, detail=f"{ticker} is already in your watchlist.")
+
+    try:
+        r = await _http_client.get(
+            f"{FH_BASE}/stock/profile2",
+            params={"symbol": ticker, "token": FINNHUB_KEY},
+            timeout=httpx.Timeout(6.0),
+        )
+        profile = r.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not reach market data server.")
+
+    if not profile.get("name"):
+        raise HTTPException(status_code=404, detail=f"Unknown ticker: {ticker}")
+
+    added_at = datetime.utcnow().isoformat()
+    with _db_conn() as conn:
+        _execute(conn,
+            "INSERT INTO watchlist (username, ticker, added_at) VALUES (?, ?, ?)",
+            (username, ticker, added_at))
+        conn.commit()
+
+    return {"ticker": ticker, "name": profile.get("name", "")}
+
+
+@app.delete("/watchlist/{ticker}")
+def remove_from_watchlist(ticker: str, username: str = Depends(_current_user)):
+    with _db_conn() as conn:
+        _execute(conn,
+            "DELETE FROM watchlist WHERE username = ? AND ticker = ?",
+            (username, ticker.upper()))
+        conn.commit()
+    return {"message": f"{ticker.upper()} removed."}
+
 
 # ---------------------------------------------------------------------------
 # Market data proxy routes
