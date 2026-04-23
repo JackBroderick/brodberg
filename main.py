@@ -31,7 +31,7 @@ This file should stay clean. It only handles:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   1. Create  commands/<your_command>.py  with fetch() + render()
   2. Register it in commands/registry.py
-  3. Add a help line to HelpMenu.txt
+  3. Add an entry to the _COMMANDS list in commands/cmd_help.py
   main.py never needs to change.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
@@ -148,7 +148,8 @@ def main(stdscr):
     pre_form_zoom = None   # zoom state saved before a form_mode pane auto-zoomed
 
     # ── Input state ───────────────────────────────────────────────────────
-    command  = ""
+    command         = ""
+    input_prefilled = False   # True when command bar was pre-filled by HELP (not user-typed)
     running  = True
     history  = []
     hist_idx = -1
@@ -194,6 +195,11 @@ def main(stdscr):
 
         # ── ` (backtick) — the ONE global key: toggle input / pane mode ───
         if key == ord("`"):
+            if input_focused and input_prefilled:
+                # Cancel a HELP prefill — clear the bar and discard the hint
+                command         = ""
+                input_prefilled = False
+                panes[focused_pane]["cache"].pop("usage_hint", None)
             input_focused = not input_focused
 
         # ══════════════════════════════════════════════════════════════════
@@ -202,8 +208,9 @@ def main(stdscr):
         elif input_focused:
 
             if key in (curses.KEY_BACKSPACE, 127, 8):
-                command  = command[:-1]
-                hist_idx = -1
+                command         = command[:-1]
+                hist_idx        = -1
+                input_prefilled = False
 
             elif key in (curses.KEY_ENTER, 10, 13):
                 if command.strip():
@@ -215,7 +222,8 @@ def main(stdscr):
                 cache    = result[2]
                 panes[focused_pane]["activecommand"] = active
                 panes[focused_pane]["cache"]         = cache
-                command = ""
+                command         = ""
+                input_prefilled = False
                 # Auto-switch to pane mode on a recognised command so the
                 # user can immediately interact with the result.
                 # Stay in input mode on an error so the user can retype.
@@ -243,8 +251,9 @@ def main(stdscr):
                     command  = history[hist_idx]
 
             elif 32 <= key <= 126:
-                command += chr(key)
-                hist_idx = -1
+                command         += chr(key)
+                hist_idx         = -1
+                input_prefilled  = False
 
         # ══════════════════════════════════════════════════════════════════
         # PANE MODE — navigation keys control panes, not the command bar
@@ -292,6 +301,22 @@ def main(stdscr):
                         pane["activecommand"],
                         pane["cache"],
                     )
+                    # A command (e.g. HELP) may request launching another command
+                    # by setting "launch_command" in its cache from on_keypress.
+                    _launch = pane["cache"].pop("launch_command", None)
+                    if _launch:
+                        result = process_command(_launch)
+                        running = result[0]
+                        pane["activecommand"] = result[1]
+                        pane["cache"]         = result[2]
+                        if pane["cache"].get("form_mode", False):
+                            pre_form_zoom = zoomed
+                            zoomed = True
+                    _prefill = pane["cache"].pop("prefill_input", None)
+                    if _prefill is not None:
+                        command         = _prefill
+                        input_focused   = True
+                        input_prefilled = True
 
 
 # ---------------------------------------------------------------------------

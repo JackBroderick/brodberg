@@ -21,7 +21,7 @@ Central command router for the Broderick Terminal.
            "on_keypress": my_module.on_keypress,  # omit if not needed
        }
 
-  3. Add a help line to HelpMenu.txt.
+  3. Add an entry to the _COMMANDS list in commands/cmd_help.py.
 
   main.py never needs to change — this file is the only edit point.
 
