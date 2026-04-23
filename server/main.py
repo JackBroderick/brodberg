@@ -90,6 +90,7 @@ _TTL_DIVIDENDS      = 3600
 _TTL_INSIDER        = 1800    # 30 minutes
 _TTL_SENTIMENT      = 300
 _TTL_OPTIONS        = 300     # 5 minutes
+_TTL_REV            = 86400   # 24 hours — filing data changes quarterly
 
 
 # ---------------------------------------------------------------------------
@@ -1489,6 +1490,19 @@ async def get_unusual_options():
 @app.get("/api/earnings")
 async def get_earnings():
     return _earnings
+
+
+@app.get("/api/revenue-breakdown/{symbol}")
+async def proxy_revenue_breakdown(symbol: str):
+    key = f"rev-breakdown:{symbol.upper()}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    r = await _http_client.get(f"{FH_BASE}/stock/revenue-breakdown",
+                               params={"symbol": symbol.upper(), "token": FINNHUB_KEY})
+    data = r.json()
+    _cache_set(key, data, _TTL_REV)
+    return data
 
 
 @app.get("/api/earnings/refresh")

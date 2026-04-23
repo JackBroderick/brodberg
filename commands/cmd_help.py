@@ -37,6 +37,7 @@ _COMMANDS = [
     ("EQUITY",  "OWN <TICKER>",             "Insider & ownership transactions",     None),
     ("EQUITY",  "SENT <TICKER>",            "News sentiment & buzz metrics",        None),
     ("EQUITY",  "OMON <TICKER>",            "Options chain monitor",                None),
+    ("EQUITY",  "REV <TICKER>",             "Revenue breakdown by segment",          None),
 
     # ── Macro ─────────────────────────────────────────────────────────────────
     ("MACRO",   "RATES",                    "U.S. Treasury yield curve",            "RATES"),

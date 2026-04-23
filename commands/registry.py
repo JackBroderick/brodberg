@@ -67,6 +67,7 @@ from commands import cmd_earn
 from commands import cmd_omon
 from commands import cmd_chat
 from commands import cmd_watch
+from commands import cmd_rev
 
 # ---------------------------------------------------------------------------
 # Registry — ordered list of command descriptors.
@@ -232,6 +233,14 @@ COMMAND_REGISTRY = [
         "fetch":       cmd_watch.fetch,
         "render":      cmd_watch.render,
         "on_keypress": cmd_watch.on_keypress,
+    },
+    # ── Revenue Breakdown ─────────────────────────────────────────────────
+    {
+        "prefix":      "REV",
+        "exact":       False,
+        "fetch":       cmd_rev.fetch,
+        "render":      cmd_rev.render,
+        "on_keypress": cmd_rev.on_keypress,
     },
 ]
 

@@ -77,6 +77,12 @@ def _filter_rows(rows: list, filt: str) -> list:
 # ---------------------------------------------------------------------------
 
 def _put(stdscr, row, col, text, color, bold=False):
+    _, w = stdscr.getmaxyx()
+    if col >= w:
+        return
+    text = str(text)[:max(0, w - col - 1)]
+    if not text:
+        return
     attr = color | (curses.A_BOLD if bold else 0)
     try:
         stdscr.attron(attr)
