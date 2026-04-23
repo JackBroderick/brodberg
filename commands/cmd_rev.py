@@ -17,13 +17,13 @@ import market_data
 _BAR_WIDTH = 22
 
 _AXIS_LABELS = {
-    "ProductOrServiceAxis":                          "BY PRODUCT / SERVICE",
-    "StatementGeographicalAxis":                     "BY GEOGRAPHY",
-    "GeographicalAxis":                              "BY GEOGRAPHY",
-    "SegmentReportingInformationBySegmentAxis":      "BY SEGMENT",
-    "RevenueTypeAxis":                               "BY REVENUE TYPE",
-    "ConcentrationRiskByBenchmarkAxis":              "BY BENCHMARK",
-    "BusinessAcquisitionAxis":                       "BY ACQUISITION",
+    "ProductOrServiceAxis":                      "BY PRODUCT / SERVICE",
+    "StatementGeographicalAxis":                 "BY GEOGRAPHY",
+    "GeographicalAxis":                          "BY GEOGRAPHY",
+    "SegmentReportingInformationBySegmentAxis":  "BY SEGMENT",
+    "RevenueTypeAxis":                           "BY REVENUE TYPE",
+    "ConcentrationRiskByBenchmarkAxis":          "BY BENCHMARK",
+    "BusinessAcquisitionAxis":                   "BY ACQUISITION",
 }
 
 
@@ -61,26 +61,41 @@ def _fmt_val(v) -> str:
     return f"${v:,.0f}"
 
 
-def _bar(pct, width: int = _BAR_WIDTH) -> str:
+def _to_float(v, default=0.0) -> float:
     try:
-        filled = max(0, min(width, int(round(float(pct) / 100 * width))))
+        return float(v)
     except (TypeError, ValueError):
-        filled = 0
+        return default
+
+
+def _bar(pct, width: int = _BAR_WIDTH) -> str:
+    filled = max(0, min(width, int(round(_to_float(pct) / 100 * width))))
     return "█" * filled + "░" * (width - filled)
 
 
 def _axis_label(raw: str) -> str:
-    """Convert 'srt:ProductOrServiceAxis' → 'BY PRODUCT / SERVICE'."""
     short = raw.split(":")[-1]
     return _AXIS_LABELS.get(short, short.replace("Axis", "").strip().upper())
 
 
-def _primary(filing: dict) -> dict | None:
-    """Return the breakdown item with the largest value (total revenue line)."""
-    items = filing.get("breakdown", [])
-    if not items:
+def _primary(filing: dict):
+    """Return the breakdown item with the largest value, or None."""
+    try:
+        items = filing.get("breakdown") or []
+        if not items:
+            return None
+        return max(items, key=lambda x: _to_float(x.get("value")))
+    except Exception:
         return None
-    return max(items, key=lambda x: float(x.get("value") or 0))
+
+
+def _has_data(filing: dict) -> bool:
+    """True if this filing has at least one non-zero breakdown entry."""
+    try:
+        items = filing.get("breakdown") or []
+        return any(_to_float(x.get("value")) > 0 for x in items)
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -98,12 +113,20 @@ def fetch(parts: list) -> dict:
         filings = raw.get("data", []) if isinstance(raw, dict) else []
         if not filings:
             return {"filings": None, "period_idx": 0, "ticker": ticker.upper(),
-                    "error": f"No revenue breakdown data for '{ticker}'. "
-                             f"This endpoint requires a Finnhub Premium plan."}
+                    "error": (f"No revenue breakdown data for '{ticker}'. "
+                              f"Requires Finnhub Premium.")}
+
+        # Auto-advance past filings with no data (most-recent may be unpopulated)
+        start_idx = 0
+        for i, f in enumerate(filings):
+            if _has_data(f):
+                start_idx = i
+                break
+
         return {
             "ticker":     ticker.upper(),
             "filings":    filings,
-            "period_idx": 0,
+            "period_idx": start_idx,
             "error":      None,
         }
     except Exception as e:
@@ -133,116 +156,124 @@ def on_keypress(key: int, cache: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def render(stdscr, cache: dict, colors: dict) -> None:
+    try:
+        _render(stdscr, cache, colors)
+    except Exception as e:
+        try:
+            stdscr.addstr(4, 2, f"Render error: {e}"[:60])
+        except Exception:
+            pass
+
+
+def _render(stdscr, cache: dict, colors: dict) -> None:
     height, width = stdscr.getmaxyx()
     sep = "  " + "─" * max(0, width - 4)
 
+    def put(row, col, text, color, bold=False):
+        _put(stdscr, row, col, text, color, bold)
+
     error = cache.get("error")
     if error:
-        _put(stdscr, 4, 0, sep, colors["dim"])
-        _put(stdscr, 5, 2, "REV", colors["orange"], bold=True)
-        _put(stdscr, 6, 0, sep, colors["dim"])
-        _put(stdscr, 7, 2, error, colors["negative"])
+        put(4, 0, sep, colors["dim"])
+        put(5, 2, "REV", colors["orange"], bold=True)
+        put(6, 0, sep, colors["dim"])
+        put(7, 2, error, colors["negative"])
         return
 
     filings = cache.get("filings")
     if not filings:
-        _put(stdscr, 4, 2, "Loading...", colors["dim"])
+        put(4, 2, "Loading...", colors["dim"])
         return
 
-    ticker     = cache.get("ticker", "")
-    idx        = cache.get("period_idx", 0)
-    n_periods  = len(filings)
-    filing     = filings[idx]
+    ticker    = cache.get("ticker", "")
+    idx       = cache.get("period_idx", 0)
+    n_periods = len(filings)
+    filing    = filings[idx]
 
     r = 4
 
     # ── Header ────────────────────────────────────────────────────────────────
-    _put(stdscr, r, 0, sep, colors["dim"]); r += 1
-    _put(stdscr, r, 2, "REV", colors["orange"], bold=True)
-    _put(stdscr, r, 7, ticker, colors["orange"], bold=True)
-    _put(stdscr, r, 7 + len(ticker) + 2, "Revenue Breakdown", colors["dim"])
+    put(r, 0, sep, colors["dim"]); r += 1
+    put(r, 2, "REV", colors["orange"], bold=True)
+    put(r, 7, ticker, colors["orange"], bold=True)
+    put(r, 7 + len(ticker) + 2, "Revenue Breakdown", colors["dim"])
     nav = f"Period {idx + 1}/{n_periods}  ← →"
-    _put(stdscr, r, max(2, width - len(nav) - 2), nav, colors["dim"])
+    put(r, max(2, width - len(nav) - 2), nav, colors["dim"])
     r += 1
-    _put(stdscr, r, 0, sep, colors["dim"]); r += 1
+    put(r, 0, sep, colors["dim"]); r += 1
 
-    # ── Primary breakdown item (total revenue for this period) ────────────────
+    # ── Primary breakdown item ────────────────────────────────────────────────
     primary = _primary(filing)
     if not primary:
-        _put(stdscr, r, 2, "No breakdown data for this period.", colors["dim"])
+        put(r, 2, "No breakdown data for this period — use ← to navigate.",
+            colors["orange"])
+        put(r + 2, 0, sep, colors["dim"])
+        hint = f"  ← older period   → newer period   ·   {idx + 1} of {n_periods} filings"
+        put(height - 1, 0, hint[:width - 1], colors["dim"])
         return
 
     start_dt  = primary.get("startDate", "N/A")
     end_dt    = primary.get("endDate",   "N/A")
-    total_rev = primary.get("value", 0)
+    total_rev = _to_float(primary.get("value", 0))
 
-    lbl = "  Period:"
-    _put(stdscr, r, 0, lbl, colors["dim"])
-    _put(stdscr, r, len(lbl) + 1, f"{start_dt}  →  {end_dt}", colors["orange"])
+    put(r, 2, "Period:", colors["dim"])
+    put(r, 12, f"{start_dt}  →  {end_dt}", colors["orange"])
     r += 1
-
-    lbl = "  Total Revenue:"
-    _put(stdscr, r, 0, lbl, colors["dim"])
-    _put(stdscr, r, len(lbl) + 1, _fmt_val(total_rev), colors["orange"], bold=True)
+    put(r, 2, "Total Revenue:", colors["dim"])
+    put(r, 18, _fmt_val(total_rev), colors["orange"], bold=True)
     r += 2
 
     # ── Segment axes ──────────────────────────────────────────────────────────
     LABEL_W = 24
     VAL_W   = 10
 
-    axes = primary.get("revenueBreakdown", [])
+    axes = primary.get("revenueBreakdown") or []
 
     if not axes:
-        _put(stdscr, r, 0, sep, colors["dim"]); r += 1
-        _put(stdscr, r, 2, "No segment breakdown available for this period.",
-             colors["dim"])
+        put(r, 0, sep, colors["dim"]); r += 1
+        put(r, 2, "No segment breakdown available for this period.", colors["orange"])
         r += 1
     else:
         for axis_obj in axes:
             if r >= height - 3:
                 break
 
-            items = axis_obj.get("data", [])
+            items = axis_obj.get("data") or []
             if not items:
                 continue
 
             axis_header = _axis_label(axis_obj.get("axis", ""))
 
-            _put(stdscr, r, 0, sep, colors["dim"]); r += 1
-            _put(stdscr, r, 2, axis_header, colors["dim"], bold=True); r += 1
+            put(r, 0, sep, colors["dim"]); r += 1
+            put(r, 2, axis_header, colors["dim"], bold=True); r += 1
 
             col_hdr = (f"  {'SEGMENT':<{LABEL_W}}  {'VALUE':>{VAL_W}}"
                        f"  {'':^{_BAR_WIDTH}}  {'SHARE':>6}")
-            _put(stdscr, r, 0, col_hdr, colors["dim"], bold=True); r += 1
+            put(r, 0, col_hdr, colors["dim"], bold=True); r += 1
 
             sorted_items = sorted(items,
-                                  key=lambda x: float(x.get("value") or 0),
+                                  key=lambda x: _to_float(x.get("value")),
                                   reverse=True)
 
             for item in sorted_items:
                 if r >= height - 2:
                     break
-                label   = str(item.get("label", "N/A"))
-                val     = item.get("value",      0)
-                pct     = item.get("percentage", 0)
-                try:
-                    pct_f = float(pct)
-                except (TypeError, ValueError):
-                    pct_f = 0.0
-
+                label   = str(item.get("label") or "N/A")
+                val_str = _fmt_val(item.get("value", 0))
+                pct_f   = _to_float(item.get("percentage", 0))
                 bar_str = _bar(pct_f)
-                val_str = _fmt_val(val)
                 pct_str = f"{pct_f:5.1f}%"
                 color   = colors["orange"] if pct_f >= 20 else colors["dim"]
 
                 line = (f"  {label:<{LABEL_W}}  {val_str:>{VAL_W}}"
                         f"  {bar_str}  {pct_str}")
-                _put(stdscr, r, 0, line, color)
+                put(r, 0, line, color)
                 r += 1
 
             r += 1  # gap between axes
 
     # ── Footer hint ───────────────────────────────────────────────────────────
-    _put(stdscr, r, 0, sep, colors["dim"])
+    if r < height - 1:
+        put(r, 0, sep, colors["dim"])
     hint = f"  ← older period   → newer period   ·   {idx + 1} of {n_periods} filings"
-    _put(stdscr, height - 1, 0, hint[:width - 1], colors["dim"])
+    put(height - 1, 0, hint[:width - 1], colors["dim"])
