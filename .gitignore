@@ -1,5 +1,6 @@
 # API keys — never commit
 api_keys.py
+.env
 
 # Python
 __pycache__/
@@ -30,3 +31,10 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
