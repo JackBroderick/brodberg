@@ -12,7 +12,7 @@ __pycache__/
 venv/
 env/
 
-# PyInstaller build output
+# PyInstaller build output   
 build/
 dist/
 *.spec
