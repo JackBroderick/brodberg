@@ -1,6 +1,6 @@
 # Broderick Terminal
 
-> A Bloomberg-style financial terminal for the command line, built in Python.
+> A Bloomberg style financial terminal for the command line, built in Python.
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
