@@ -18,7 +18,7 @@
 
 ## Overview
 
-Broderick Terminal is a full-featured financial terminal that runs directly in your shell. It pulls live market data, renders price charts, tracks real ships at sea, and supports multi-user online accounts — all from a curses-based UI that looks and feels like a professional trading terminal.
+Broderick Terminal is a full-featured financial terminal that runs directly in your shell. It pulls live market data, renders price charts, tracks real ships at sea, hosts real-time multi-room chat with live ticker mentions, and supports multi-user online accounts — all from a curses-based UI that looks and feels like a professional trading terminal.
 
 All market data is proxied through a central server. **Users never need API keys.** Just run the app and start trading data.
 
@@ -32,6 +32,7 @@ All market data is proxied through a central server. **Users never need API keys
 | **Macro** | U.S. Treasury yield curve, FX major/EM pairs vs USD, commodities dashboard (energy, metals, grains) |
 | **Shipping** | Live AIS vessel tracking at the Strait of Hormuz via WebSocket stream |
 | **Options** | Unusual options activity, open interest monitor |
+| **Chat** | Real-time multi-room chat (#general, #biotech, #smallcap, #support, #random), direct messages, `$TICKER` mentions with live price change, admin moderation |
 | **Accounts** | Register, login, public profiles — JWT-authenticated via FastAPI backend |
 | **UI** | Multi-pane layout (up to 3 panes), input mode / pane navigation mode, zoom |
 
@@ -126,6 +127,24 @@ PANE mode         Z=zoom  Tab=cycle pane  ← →=switch tab/timeframe  ↑ ↓=
 |---|---|
 | `SHIP HORMUZ` | Live vessel positions at the Strait of Hormuz |
 
+### Chat
+
+| Command | Description |
+|---|---|
+| `CHAT` | Open all chat rooms (#general, #biotech, #smallcap, #support, #random) |
+| `CHAT <user>` | Open a direct message thread with that user |
+
+Inside the chat pane:
+
+| Key | Action |
+|---|---|
+| `← →` | Cycle between rooms |
+| `↑ ↓` | Scroll message history |
+| `Enter` | Send message |
+| `` ` `` | Exit chat / return to input mode |
+
+Type `$TICKER` anywhere in a message (e.g. `$AAPL`) and it renders inline with a live price change badge. Requires login.
+
 ### Account
 
 | Command | Description |
@@ -166,7 +185,8 @@ Broderick Server (FastAPI + PostgreSQL)
   ├── GET  /api/forex/rates           FX spot rates
   ├── GET  /api/forex/candles         FX OHLC candles
   ├── GET  /api/live/benchmarks       Real-time benchmark prices
-  └── WS   /api/ship                  AISStream WebSocket proxy
+  ├── WS   /api/ship                  AISStream WebSocket proxy
+  └── WS   /api/chat                  Multi-room chat + DMs (auth, history, moderation)
 ```
 
 The server holds all API keys. The client holds none. Anyone can run the client and hit the live server, or [self-host their own instance](#self-hosting).
@@ -255,6 +275,7 @@ brodberg/
 ├── broderick_session.py      Session management (~/.broderick/session.json)
 ├── chart.py                  ASCII price chart renderer
 ├── ship_data.py              AIS WebSocket client
+├── chat_data.py              Chat WebSocket client — rooms, DMs, message store
 ├── requirements.txt          Client dependencies
 │
 ├── server/
@@ -281,6 +302,7 @@ brodberg/
 │   ├── cmd_own.py            OWN
 │   ├── cmd_sent.py           SENT
 │   ├── cmd_ipo.py            IPO
+│   ├── cmd_chat.py           CHAT
 │   ├── cmd_watch.py          WATCH
 │   ├── cmd_rev.py            REV
 │   ├── cmd_user.py           USER
